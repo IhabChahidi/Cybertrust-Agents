@@ -7,3 +7,4 @@ web/certs/
 .env
 CISO*.txt
 ~$*.docx
+.claude/
