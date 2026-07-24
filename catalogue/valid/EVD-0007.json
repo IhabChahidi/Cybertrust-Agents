@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0007",
+  "source": "AUDIT-FICTIF",
+  "date": "2026-07-22T11:00:00Z",
+  "type": "audit_record",
+  "content": {
+    "summary": "L'action d'audit AUD-3390 est cloturee et accompagnee d'un proces-verbal signe.",
+    "raw_data": "action_id=AUD-3390; status=Closed; owner=RSSI-Adjoint; deadline=2026-07-15; pv_reference=PV-3390; pv_status=Signed; closed_at=2026-07-20T09:00:00Z",
+    "affected_assets": [
+      "SRV-AUDIT-01"
+    ],
+    "indicators": [
+      "AUD-3390",
+      "PV-3390"
+    ]
+  },
+  "severity": "LOW",
+  "integrity_hash": "sha256:009a3b4038fdd260226b320eb34a9ad9c3831e7fea09b6ee8bcc51ca4c779267"
+}

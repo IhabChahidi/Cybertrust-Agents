@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion — CyberTrust Agents</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="auth-page">
+  <div class="auth-panel">
+    <h1>CyberTrust Agents</h1>
+    <p class="subtitle">Acces securise au tableau de bord CISO</p>
+
+    <div id="flash-message" class="validation-message hidden" role="status" aria-live="polite"></div>
+
+    <form id="login-form" novalidate>
+      <div id="form-error" class="validation-message hidden" role="alert" aria-live="assertive"></div>
+
+      <label for="username">Identifiant</label>
+      <input type="text" id="username" name="username" autocomplete="username" required aria-required="true">
+
+      <label for="password" class="mt-1">Mot de passe</label>
+      <div class="password-field">
+        <input type="password" id="password" name="password" autocomplete="current-password" required aria-required="true">
+        <button type="button" id="toggle-password" class="toggle-password" aria-pressed="false" aria-label="Afficher le mot de passe">Afficher</button>
+      </div>
+
+      <button type="submit" id="login-submit" class="btn btn-primary mt-1" style="width:100%; justify-content:center;">
+        <span id="login-spinner" class="spinner hidden" aria-hidden="true"></span>
+        <span id="login-btn-label">Se connecter</span>
+      </button>
+    </form>
+
+    <p class="auth-security-note">Acces reserve au CISO et aux representants autorises.</p>
+  </div>
+</main>
+<script type="module" src="/js/login-page.js"></script>
+</body>
+</html>

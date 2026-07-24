@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-N002",
+  "source": "SCANNER-FICTIF",
+  "date": "2026-07-22T09:40:00Z",
+  "type": "scan_result",
+  "content": {
+    "summary": "Scan de routine sur l actif SRV-WEB-11, aucune anomalie detectee.",
+    "raw_data": "scan_type=routine; result=Clean",
+    "affected_assets": ["SRV-WEB-11"],
+    "indicators": []
+  },
+  "severity": "LOW",
+  "integrity_hash": "sha256:5c7da8e997d4ef72d58df07e0a44da9fea515e5e5dbde067cba12824ed1d2841",
+  "extra_field": "test"
+}

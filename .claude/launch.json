@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cybertrust-mcp-dashboard",
+      "runtimeExecutable": "C:/Users/ASUS/AppData/Local/Programs/Python/Python313/python.exe",
+      "runtimeArgs": [
+        "-m", "uvicorn", "web.backend:app", "--port", "8000",
+        "--ssl-keyfile", "web/certs/localhost.key",
+        "--ssl-certfile", "web/certs/localhost.crt", "--reload"
+      ],
+      "port": 8000,
+      "url": "https://localhost:8000"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0008",
+  "source": "AUDIT-FICTIF",
+  "date": "2026-07-22T11:10:00Z",
+  "type": "audit_record",
+  "content": {
+    "summary": "L'action decidee lors du comite de securite AUD-3402 reste ouverte, sans proprietaire ni echeance assignes.",
+    "raw_data": "action_id=AUD-3402; status=Open; owner=absent; deadline=absent; pv_reference=absent; source_meeting=ComiteSecurite-2026-07-10",
+    "affected_assets": [
+      "SRV-ADMIN-05"
+    ],
+    "indicators": [
+      "AUD-3402"
+    ]
+  },
+  "severity": "MEDIUM",
+  "integrity_hash": "sha256:91fb886afbabb8b2b548878c161de06389b432fbdadbc0a04999fbcbc1d76a0a"
+}

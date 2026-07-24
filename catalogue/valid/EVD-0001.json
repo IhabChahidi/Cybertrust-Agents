@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0001",
+  "source": "ITSM-FICTIF",
+  "date": "2026-07-22T09:10:00Z",
+  "type": "ticket",
+  "content": {
+    "summary": "Le ticket critique SEC-1452 est marque comme cloture par l'equipe IT.",
+    "raw_data": "ticket_id=SEC-1452; status=Closed; severity=Critical; closed_at=2026-07-22T09:10:00Z; remediation_attachment=none",
+    "affected_assets": [
+      "SRV-FINANCE-01"
+    ],
+    "indicators": [
+      "SEC-1452"
+    ]
+  },
+  "severity": "CRITICAL",
+  "integrity_hash": "sha256:f8d0b3d7afe96a1a877e4c793bf310a4bf81309c0ee91405b0a4a492846a742a"
+}

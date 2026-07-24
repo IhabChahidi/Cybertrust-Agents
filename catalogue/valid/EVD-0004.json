@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0004",
+  "source": "SCANNER-FICTIF",
+  "date": "2026-07-22T10:00:00Z",
+  "type": "scan_result",
+  "content": {
+    "summary": "Le nouveau scan post-correctif ne detecte plus la vulnerabilite CVE-2024-4711 sur l'actif concerne.",
+    "raw_data": "cve_id=CVE-2024-4711; scan_type=post_patch; result=Clean; scanned_at=2026-07-22T10:00:00Z; patch_reference=PATCH-4711",
+    "affected_assets": [
+      "SRV-WEB-07"
+    ],
+    "indicators": [
+      "CVE-2024-4711"
+    ]
+  },
+  "severity": "LOW",
+  "integrity_hash": "sha256:187d01d2ac83caaf845e5398253558e795cf67d63652545c27141948c4806981"
+}

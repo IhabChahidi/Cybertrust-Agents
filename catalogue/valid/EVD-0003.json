@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0003",
+  "source": "VALIDATION-FICTIVE",
+  "date": "2026-07-22T09:20:00Z",
+  "type": "validation_record",
+  "content": {
+    "summary": "Le ticket critique SEC-2201 est cloture et accompagne d'un rapport de correctif valide.",
+    "raw_data": "ticket_id=SEC-2201; status=Closed; severity=Critical; closed_at=2026-07-21T14:00:00Z; patch_report=PATCH-RPT-2201; rescan_result=Clean; validation_status=EvidenceComplete",
+    "affected_assets": [
+      "SRV-HR-02"
+    ],
+    "indicators": [
+      "SEC-2201",
+      "PATCH-RPT-2201"
+    ]
+  },
+  "severity": "LOW",
+  "integrity_hash": "sha256:6f395d01863e22c56606d7c842809c132295752bdd9510805e71c0bb2d5fd5f2"
+}

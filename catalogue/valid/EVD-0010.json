@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0010",
+  "source": "PATCHMGMT-FICTIF",
+  "date": "2026-07-22T10:45:00Z",
+  "type": "report",
+  "content": {
+    "summary": "Un rapport partiel concernant CVE-2024-6104 ne contient ni la date d'application du correctif ni le perimetre des actifs couverts.",
+    "raw_data": "cve_id=CVE-2024-6104; patch_report=PATCH-RPT-6104-PARTIAL; applied_at=absent; scope=absent; rescan_result=absent",
+    "affected_assets": [],
+    "indicators": [
+      "CVE-2024-6104"
+    ]
+  },
+  "severity": "MEDIUM",
+  "integrity_hash": "sha256:4217532818280570fb32b2111dea7134c3c7f3e5f4f3fcded094753bd11fd426"
+}

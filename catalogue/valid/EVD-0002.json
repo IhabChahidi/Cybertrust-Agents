@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0002",
+  "source": "VALIDATION-FICTIVE",
+  "date": "2026-07-22T09:15:00Z",
+  "type": "validation_record",
+  "content": {
+    "summary": "Aucune preuve technique de remediation n'est associee au ticket SEC-1452.",
+    "raw_data": "ticket_id=SEC-1452; validation_status=MissingEvidence; patch_report=absent; rescan_result=absent",
+    "affected_assets": [
+      "SRV-FINANCE-01"
+    ],
+    "indicators": [
+      "SEC-1452"
+    ]
+  },
+  "severity": "HIGH",
+  "integrity_hash": "sha256:83971b88a5257e09fe7ca7253f44f596b0a3b49dddb07e6f262f12156711f337"
+}

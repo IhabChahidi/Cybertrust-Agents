@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-N001",
+  "source": "ITSM-FICTIF",
+  "date": "2026-07-22T09:30:00Z",
+  "type": "ticket",
+  "content": {
+    "summary": "Le ticket SEC-1500 est en cours de traitement, sans preuve de cloture.",
+    "raw_data": "ticket_id=SEC-1500; status=InProgress",
+    "affected_assets": ["SRV-LOG-04"],
+    "indicators": ["SEC-1500"]
+  },
+  "severity": "MEDIUM"
+}

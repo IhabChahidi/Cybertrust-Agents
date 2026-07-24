@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0006",
+  "source": "PATCHMGMT-FICTIF",
+  "date": "2026-07-22T10:30:00Z",
+  "type": "report",
+  "content": {
+    "summary": "Un rapport de correctif est disponible pour CVE-2024-5820, mais aucun resultat de nouveau scan n'a ete produit.",
+    "raw_data": "cve_id=CVE-2024-5820; patch_report=PATCH-RPT-5820; applied_at=2026-07-21T18:00:00Z; rescan_result=absent",
+    "affected_assets": [
+      "SRV-DB-03"
+    ],
+    "indicators": [
+      "CVE-2024-5820",
+      "PATCH-RPT-5820"
+    ]
+  },
+  "severity": "MEDIUM",
+  "integrity_hash": "sha256:f4be1e57872937c730aae7b44a1fd65ca600f2dd3908eb1eed39b1a49b1cbe16"
+}

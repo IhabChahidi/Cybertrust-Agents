@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "session_id": "SES-20260722-PILOT",
+  "correlation_id": "COR-20260722-PILOT",
+  "id": "EVD-0009",
+  "source": "AUDIT-FICTIF",
+  "date": "2026-07-22T11:20:00Z",
+  "type": "audit_record",
+  "content": {
+    "summary": "Le proces-verbal PV-3390 associe a l'action AUD-3390 a ete invalide a posteriori par le service Conformite.",
+    "raw_data": "action_id=AUD-3390; pv_reference=PV-3390; pv_status=Invalidated; invalidated_at=2026-07-22T08:00:00Z; invalidation_reason=SignatureNonConforme",
+    "affected_assets": [
+      "SRV-AUDIT-01"
+    ],
+    "indicators": [
+      "AUD-3390",
+      "PV-3390"
+    ]
+  },
+  "severity": "HIGH",
+  "integrity_hash": "sha256:bac752ac7bf02c4f5451903faa3041a99f576bd06fe36d7cabdf2ac0227418ce"
+}
