@@ -3,9 +3,11 @@
 These target the orchestrator's defense-in-depth checks against a *misbehaving*
 role output — schema-valid but semantically wrong — which is exactly the shape
 of failure a real LLM can produce (see docs/s3_llama_test_results.md: a real
-Validator run returned requires_ciso_approval=false on a HIGH-risk dossier,
-which is the live incident test_ciso_approval_required_blocks_high_risk below
-reproduces deterministically).
+Validator run, back when the Validator was still LLM-backed, returned
+requires_ciso_approval=false on a HIGH-risk dossier, which is the live incident
+test_ciso_approval_required_blocks_high_risk below reproduces deterministically).
+The Validator has since been replaced by a fully deterministic policy engine
+(mcp_server/policy.py) precisely because of this incident.
 """
 
 from datetime import datetime, timezone
@@ -18,14 +20,15 @@ from tests.conftest import make_request
 def test_ciso_approval_required_blocks_high_risk_without_flag(mcp):
     """A Validator that never grants requires_ciso_approval must not let a
     HIGH/CRITICAL dossier through — this is the exact failure mode observed
-    live with a real LLM Validator (docs/s3_llama_test_results.md)."""
+    when the Validator was still LLM-backed (docs/s3_llama_test_results.md)."""
 
     class RogueValidator(Validator):
-        def validate(self, *, verification_result, mcp_score, decision_id, session_id, correlation_id):
+        def validate(self, *, verification_result, mcp_score, diagnostic_warnings, decision_id, session_id, correlation_id):
             return {
                 "schema_version": "1.0", "session_id": session_id, "correlation_id": correlation_id,
                 "id": decision_id, "verification_result_id": verification_result["id"],
-                "mcp_score_reference": mcp_score["id"], "decision": "APPROVED_FOR_CISO_REVIEW",
+                "mcp_score_reference": mcp_score["id"], "decision": "READY_FOR_CISO_INFORMATION",
+                "diagnostic_warnings": list(diagnostic_warnings or []),
                 "justification": "j", "risk_level": mcp_score["risk_level"],
                 "requires_ciso_approval": False,  # wrong on purpose: HIGH/CRITICAL always requires this
                 "decided_at": datetime.now(timezone.utc).isoformat(), "validator_role": "VALIDATOR",
@@ -48,6 +51,33 @@ def test_ciso_approval_required_blocks_high_risk_without_flag(mcp):
     assert result["partial"]["verification_result"]["status"] == "supported"
     assert result["partial"]["claim"] is not None
     assert result["partial"]["validation_decision"] is None  # rejected before being bound
+
+
+def test_ready_for_ciso_decision_without_approval_flag_blocks(mcp):
+    """Governance invariant: READY_FOR_CISO_DECISION always means mandatory CISO
+    sign-off. A Validator returning that decision with requires_ciso_approval=False
+    must be blocked, independent of the HIGH/CRITICAL risk-level floor check."""
+
+    class RogueValidator(Validator):
+        def validate(self, *, verification_result, mcp_score, diagnostic_warnings, decision_id, session_id, correlation_id):
+            return {
+                "schema_version": "1.0", "session_id": session_id, "correlation_id": correlation_id,
+                "id": decision_id, "verification_result_id": verification_result["id"],
+                "mcp_score_reference": mcp_score["id"], "decision": "READY_FOR_CISO_DECISION",
+                "diagnostic_warnings": list(diagnostic_warnings or []),
+                "justification": "j", "risk_level": mcp_score["risk_level"],
+                "requires_ciso_approval": False,  # wrong on purpose
+                "decided_at": datetime.now(timezone.utc).isoformat(), "validator_role": "VALIDATOR",
+            }
+
+    mcp.validator = RogueValidator()
+    # EVD-0007 alone is LOW risk in mock mode, so the HIGH/CRITICAL floor check
+    # would not itself catch this -- only the READY_FOR_CISO_DECISION-specific
+    # invariant does.
+    result = mcp.process_request(make_request(["EVD-0007"]))
+
+    assert result["mcp_state"] == "BLOCKED"
+    assert result["blocked_reason"] == EventCode.CISO_APPROVAL_REQUIRED.value
 
 
 def test_invalid_claim_reference_blocks(mcp):
@@ -75,11 +105,12 @@ def test_invalid_verification_reference_in_decision_blocks(mcp):
     """A Validator whose ValidationDecision points at the wrong VerificationResult must be rejected."""
 
     class RogueValidator(Validator):
-        def validate(self, *, verification_result, mcp_score, decision_id, session_id, correlation_id):
+        def validate(self, *, verification_result, mcp_score, diagnostic_warnings, decision_id, session_id, correlation_id):
             return {
                 "schema_version": "1.0", "session_id": session_id, "correlation_id": correlation_id,
                 "id": decision_id, "verification_result_id": "VER-9999",  # wrong on purpose
-                "mcp_score_reference": mcp_score["id"], "decision": "APPROVED_FOR_CISO_REVIEW",
+                "mcp_score_reference": mcp_score["id"], "decision": "READY_FOR_CISO_DECISION",
+                "diagnostic_warnings": list(diagnostic_warnings or []),
                 "justification": "j", "risk_level": mcp_score["risk_level"], "requires_ciso_approval": True,
                 "decided_at": datetime.now(timezone.utc).isoformat(), "validator_role": "VALIDATOR",
             }
@@ -95,13 +126,13 @@ def test_invalid_score_reference_in_decision_blocks(mcp):
     """A Validator whose ValidationDecision points at the wrong MCPScore must be rejected."""
 
     class RogueValidator(Validator):
-        def validate(self, *, verification_result, mcp_score, decision_id, session_id, correlation_id):
+        def validate(self, *, verification_result, mcp_score, diagnostic_warnings, decision_id, session_id, correlation_id):
             return {
                 "schema_version": "1.0", "session_id": session_id, "correlation_id": correlation_id,
                 "id": decision_id, "verification_result_id": verification_result["id"],
                 "mcp_score_reference": "MCP-SCORE-9999",  # wrong on purpose
-                "decision": "APPROVED_FOR_CISO_REVIEW", "justification": "j",
-                "risk_level": mcp_score["risk_level"], "requires_ciso_approval": True,
+                "decision": "READY_FOR_CISO_DECISION", "diagnostic_warnings": list(diagnostic_warnings or []),
+                "justification": "j", "risk_level": mcp_score["risk_level"], "requires_ciso_approval": True,
                 "decided_at": datetime.now(timezone.utc).isoformat(), "validator_role": "VALIDATOR",
             }
 

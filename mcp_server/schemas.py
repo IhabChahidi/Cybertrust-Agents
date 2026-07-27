@@ -26,7 +26,12 @@ EVIDENCE_SCHEMA = {
         "date": {"type": "string", "format": "date-time"},
         "type": {
             "type": "string",
-            "enum": ["ticket", "report", "scan_result", "audit_record", "validation_record"],
+            # "incident_action" and "committee_action" are additive (UC-04/UC-05,
+            # backward compatible: existing Evidence/consumers are unaffected).
+            "enum": [
+                "ticket", "report", "scan_result", "audit_record", "validation_record",
+                "incident_action", "committee_action",
+            ],
         },
         "content": {
             "type": "object",
@@ -146,7 +151,7 @@ VALIDATION_DECISION_SCHEMA = {
     "type": "object",
     "required": [
         "schema_version", "session_id", "correlation_id", "id", "verification_result_id",
-        "mcp_score_reference", "decision", "justification", "risk_level",
+        "mcp_score_reference", "decision", "diagnostic_warnings", "justification", "risk_level",
         "requires_ciso_approval", "decided_at", "validator_role",
     ],
     "additionalProperties": False,
@@ -155,15 +160,66 @@ VALIDATION_DECISION_SCHEMA = {
         "id": {"type": "string", "pattern": "^VAL-[0-9]{4}$"},
         "verification_result_id": {"type": "string", "pattern": "^VER-[0-9]{4}$"},
         "mcp_score_reference": {"type": "string", "pattern": "^MCP-SCORE-[0-9]{4}$"},
+        # Governance constraint (see mcp_server/policy.py for the full rationale):
+        # the CISO is the sole human decision authority in this pipeline. There is
+        # no HUMAN_REVIEW and no APPROVED_FOR_CISO_REVIEW here -- every case
+        # needing attention is routed via READY_FOR_CISO_DECISION.
+        # READY_FOR_CISO_INFORMATION is NOT an approval: it means the case is
+        # included in the CISO's information synthesis without requiring an
+        # immediate decision. REJECTED and INSUFFICIENT_EVIDENCE are pipeline
+        # recommendations, not a final CISO rejection (see section 8 governance
+        # note: the CISO's own APPROVE/REJECT/REQUEST_MORE_EVIDENCE/DEFER action
+        # is recorded separately, never automatically).
         "decision": {
             "type": "string",
-            "enum": ["APPROVED_FOR_CISO_REVIEW", "HUMAN_REVIEW", "REJECTED", "INSUFFICIENT_EVIDENCE"],
+            "enum": [
+                "READY_FOR_CISO_DECISION", "READY_FOR_CISO_INFORMATION",
+                "REJECTED", "INSUFFICIENT_EVIDENCE",
+            ],
+        },
+        # Deterministic diagnostic warning codes (mcp_server.diagnostics) -- advisory
+        # signals derived from Evidence content that can escalate routing but never
+        # rewrite VerificationResult.status. Always present (possibly empty).
+        "diagnostic_warnings": {
+            "type": "array", "items": {"type": "string", "maxLength": 100},
+        },
+        # Optional (not in `required`): structured companion to diagnostic_warnings
+        # (mcp_server.diagnostics.compute_diagnostic_details) -- one object per
+        # warning with severity/evidence_ids/field/message/rule_id. Additive-only:
+        # diagnostic_warnings (the list of bare codes) remains the required,
+        # backward-compatible field; this is richer detail for consumers that want it.
+        "diagnostic_details": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["code", "severity", "evidence_ids", "message", "rule_id"],
+                "additionalProperties": True,
+                "properties": {
+                    "code": {"type": "string", "maxLength": 100},
+                    "severity": {"type": "string", "enum": ["SERIOUS", "INFORMATIONAL"]},
+                    "evidence_ids": {"type": "array", "items": {"type": "string", "pattern": "^EVD-[0-9]{4}$"}},
+                    "field": {"type": ["string", "null"]},
+                    "message": {"type": "string", "maxLength": 500},
+                    "rule_id": {"type": "string", "maxLength": 50},
+                },
+            },
         },
         "justification": {"type": "string", "minLength": 1, "maxLength": 2000},
         "risk_level": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
         "requires_ciso_approval": {"type": "boolean"},
         "decided_at": {"type": "string", "format": "date-time"},
         "validator_role": {"type": "string", "const": "VALIDATOR"},
+        # Optional (not in `required`): which row of mcp_server.policy's routing
+        # table produced this decision, for audit traceability. Additive-only.
+        "policy_rule": {"type": "string", "maxLength": 100},
+        # Workstream B traceability fields (mcp_server/policy_config.py). All
+        # optional/additive. configuration_hash is a short content hash of the
+        # loaded config/policy_rules.yaml, never a filesystem path (no internal
+        # path is ever exposed in a ValidationDecision).
+        "policy_version": {"type": "string", "maxLength": 20},
+        "policy_reason": {"type": "string", "maxLength": 300},
+        "applied_exception": {"type": "boolean"},
+        "configuration_hash": {"type": "string", "maxLength": 64},
     },
 }
 

@@ -1,62 +1,56 @@
 """Deterministic stand-in for the external Verifier role.
 
 Receives only `claim` and the `evidence` it references — never the Generator's
-prompt or session history (isolation rule, TC-14). Detects contradictions
-between the referenced Evidence items themselves (not against the Claim's
-wording) and flags incompleteness from explicit "...=absent" markers.
+prompt or session history (isolation rule, TC-14). Contradiction and
+incompleteness signals are derived from exact, parsed raw_data fields via
+mcp_server.evidence_parsing — never a substring search across free text (see
+that module's docstring: a naive substring match is an injection surface a
+comment, a quoted example, or attacker-controlled text could trigger just by
+containing the right word).
 """
 
 from datetime import datetime, timezone
 
+from mcp_server.evidence_parsing import fields_marked_absent, find_contradictions
 from mcp_server.llm_roles.base import Verifier
-
-# Each pair (marker_a, marker_b) found across different referenced Evidence
-# items indicates the Evidence set disagrees with itself.
-_CONTRADICTION_MARKERS = [
-    ("result=clean", "stillpresent"),
-    ("pv_status=signed", "pv_status=invalidated"),
-]
 
 
 class MockVerifier(Verifier):
 
     def verify(self, *, claim: dict, evidence: list[dict], verification_id: str,
                session_id: str, correlation_id: str) -> dict:
-        raw_by_id = {e["id"]: e["content"]["raw_data"].lower() for e in evidence}
+        contradictions = find_contradictions(evidence)
 
-        contradicting: list[str] = []
-        supporting: list[str] = []
-        for marker_a, marker_b in _CONTRADICTION_MARKERS:
-            ids_a = [eid for eid, raw in raw_by_id.items() if marker_a in raw]
-            ids_b = [eid for eid, raw in raw_by_id.items() if marker_b in raw]
-            if ids_a and ids_b:
-                supporting.extend(ids_a)
-                contradicting.extend(ids_b)
-
-        if contradicting:
+        if contradictions:
             status = "contradicted"
-            reasoning = (
-                f"Les Evidence {sorted(set(supporting))} et {sorted(set(contradicting))} "
-                "se contredisent sur le meme indicateur ou actif."
-            )
+            supporting = sorted({h["baseline_id"] for h in contradictions})
+            contradicting = sorted({h["anomaly_id"] for h in contradictions})
             missing: list[str] = []
+            reasoning = (
+                f"Les Evidence {supporting} et {contradicting} se contredisent sur le meme "
+                "indicateur ou actif."
+            )
         else:
-            absent_ids = [eid for eid, raw in raw_by_id.items() if "absent" in raw]
-            if absent_ids:
+            absent = [(e["id"], fields_marked_absent(e)) for e in evidence]
+            absent = [(eid, fields) for eid, fields in absent if fields]
+            if absent:
                 status = "insufficient_evidence"
-                supporting = [eid for eid in raw_by_id if eid not in absent_ids]
+                absent_ids = sorted(eid for eid, _ in absent)
+                supporting = sorted(eid for eid in {e["id"] for e in evidence} if eid not in absent_ids)
+                contradicting = []
                 missing = [f"{eid}: champ(s) marque(s) absent dans raw_data" for eid in absent_ids]
                 reasoning = (
-                    f"Les Evidence {sorted(absent_ids)} indiquent des champs manquants "
-                    "empechant de conclure."
+                    f"Les Evidence {absent_ids} indiquent des champs manquants empechant de "
+                    "conclure."
                 )
             else:
                 status = "supported"
-                supporting = list(raw_by_id.keys())
+                supporting = sorted(e["id"] for e in evidence)
+                contradicting = []
                 missing = []
                 reasoning = (
-                    f"Les Evidence {sorted(supporting)} sont coherentes entre elles et "
-                    "confirment l'affirmation du Claim."
+                    f"Les Evidence {supporting} sont coherentes entre elles et confirment "
+                    "l'affirmation du Claim."
                 )
 
         return {

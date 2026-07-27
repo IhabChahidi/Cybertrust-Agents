@@ -1,0 +1,72 @@
+# CyberTrust Agents — configurable business-exception rules (Workstream B).
+#
+# This file can ONLY narrow or redirect routing within the four allowed decision
+# values, and only for verification_status in {supported, unsupported,
+# contradicted}. It is schema-validated at load time by
+# mcp_server/policy_config.py (POLICY_CONFIG_SCHEMA) and enforced with hard,
+# code-level invariant checks that no rule here can bypass:
+#   - insufficient_evidence ALWAYS produces INSUFFICIENT_EVIDENCE (this status
+#     cannot even be matched by a rule — see the schema's enum).
+#   - unsupported / contradicted can NEVER become READY_FOR_CISO_INFORMATION,
+#     even if a rule below tried to say so (mcp_server/policy.py rejects it).
+#   - HUMAN_REVIEW can never appear in `action.decision` — the config schema's
+#     enum for that field does not include it, so a YAML file naming it fails
+#     validation and the whole file is rejected (fail closed to the built-in
+#     default table).
+#   - requires_ciso_approval is always recomputed from the final decision in
+#     code (mcp_server.policy.requires_ciso_approval), regardless of what a
+#     rule's action.requires_ciso_approval says — defense in depth.
+#
+# Malformed YAML, a schema violation, or a duplicate rule id/priority causes the
+# whole file to be rejected and the built-in default table to be used instead
+# (see mcp_server/policy_config.py::load_policy_config and policy.py's
+# fail-closed wrapper around it) — never a partial/best-effort application.
+
+policy_version: "1.1"
+rules:
+  # Mirrors the built-in default (supported + HIGH/CRITICAL -> CISO decision).
+  # Kept here explicitly so it is auditable/versioned like any other rule, not
+  # just implicit in Python.
+  - id: "POL-001"
+    enabled: true
+    priority: 100
+    match:
+      verification_status: "supported"
+      risk_levels: ["HIGH", "CRITICAL"]
+    action:
+      decision: "READY_FOR_CISO_DECISION"
+      requires_ciso_approval: true
+    reason: "High-risk supported claims require a CISO decision."
+
+  # Documented business exception (spec section 5): a contradicted result must
+  # always be surfaced to the CISO, at any risk level. This is already the
+  # unconditional default in policy.py; expressed here too so it is visible and
+  # auditable as an explicit, versioned rule rather than only a Python default.
+  - id: "POL-002"
+    enabled: true
+    priority: 100
+    match:
+      verification_status: "contradicted"
+    action:
+      decision: "READY_FOR_CISO_DECISION"
+      requires_ciso_approval: true
+    reason: "Contradicted claims are always escalated to the CISO, regardless of risk level."
+
+  # Example of a narrowly-scoped, currently-DISABLED exception: a documented
+  # business decision routing LOW-risk unsupported claims to the CISO for
+  # visibility (still within the allowed enum: unsupported can be REJECTED or
+  # escalated to READY_FOR_CISO_DECISION, but never READY_FOR_CISO_INFORMATION
+  # -- that value is not even offered by the config schema for this status).
+  # Disabled by default -- flipping `enabled: true` is a deliberate, auditable
+  # act, not a silent behavior change. Included to demonstrate the mechanism's
+  # shape, not as a live policy.
+  - id: "POL-003"
+    enabled: false
+    priority: 50
+    match:
+      verification_status: "unsupported"
+      risk_levels: ["LOW"]
+    action:
+      decision: "READY_FOR_CISO_DECISION"
+      requires_ciso_approval: true
+    reason: "Example (disabled): a documented business decision could route even LOW-risk unsupported claims to the CISO for visibility instead of auto-rejecting them."

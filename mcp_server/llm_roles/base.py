@@ -37,16 +37,19 @@ class Verifier(ABC):
 
 
 class Validator(ABC):
-    """Produces a ValidationDecision from a VerificationResult + MCPScore only."""
+    """Produces a ValidationDecision from a VerificationResult + MCPScore + diagnostic
+    warnings only."""
 
     role_name = "VALIDATOR"
 
     @abstractmethod
-    def validate(self, *, verification_result: dict, mcp_score: dict, decision_id: str,
-                 session_id: str, correlation_id: str) -> dict[str, Any]:
+    def validate(self, *, verification_result: dict, mcp_score: dict, diagnostic_warnings: list[str],
+                 decision_id: str, session_id: str, correlation_id: str) -> dict[str, Any]:
         """Return a ValidationDecision dict conforming to VALIDATION_DECISION_SCHEMA.
 
         Must NOT receive the Evidence catalogue, the Claim, or the Generator's
-        context — only verification_result and mcp_score, per the isolation rule.
+        context — only verification_result, mcp_score, and the list of diagnostic
+        warning codes (strings only, never raw Evidence content) computed by
+        mcp_server.diagnostics, per the isolation rule.
         """
         raise NotImplementedError

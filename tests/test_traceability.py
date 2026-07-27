@@ -22,7 +22,7 @@ def test_tc13_journal_records_full_transition_order(mcp):
 
     canonical_order = [
         "INIT", "VALIDATION_ENTREE", "SELECTION_EVIDENCE", "GENERATION_CLAIM",
-        "VERIFICATION", "SCORING", "VALIDATION", "DECISION_CISO", "COMPLETED",
+        "VERIFICATION", "DIAGNOSTICS", "SCORING", "VALIDATION", "DECISION_CISO", "COMPLETED",
     ]
     seen_indices = [canonical_order.index(s) for s in states]
     assert seen_indices == sorted(seen_indices), "MCP states must not appear out of order"

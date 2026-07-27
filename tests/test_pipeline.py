@@ -10,13 +10,15 @@ def test_tc01_full_pipeline_nominal(mcp):
     assert result["mcp_state"] == "COMPLETED"
     assert result["transitions"] == [
         "INIT", "VALIDATION_ENTREE", "SELECTION_EVIDENCE", "GENERATION_CLAIM",
-        "VERIFICATION", "SCORING", "VALIDATION", "DECISION_CISO", "COMPLETED",
+        "VERIFICATION", "DIAGNOSTICS", "SCORING", "VALIDATION", "DECISION_CISO", "COMPLETED",
     ]
     assert result["claim"]["evidence_ids"] == ["EVD-0007"]
     assert result["mcp_score"]["value"] >= 0
+    # The only four decision/routing values this pipeline may ever produce
+    # (mcp_server/policy.py) -- there is no HUMAN_REVIEW and no CLOSED_ prefix.
     assert result["ciso_routing"] in {
         "READY_FOR_CISO_DECISION", "READY_FOR_CISO_INFORMATION",
-        "CLOSED_REJECTED", "CLOSED_INSUFFICIENT_EVIDENCE",
+        "REJECTED", "INSUFFICIENT_EVIDENCE",
     }
 
 
@@ -35,7 +37,7 @@ def test_tc03_medium_severity_routes_to_information(mcp):
 
     assert result["mcp_state"] == "COMPLETED"
     # insufficient_evidence closes the flow without needing CISO decision either way
-    assert result["ciso_routing"] in {"READY_FOR_CISO_INFORMATION", "CLOSED_INSUFFICIENT_EVIDENCE"}
+    assert result["ciso_routing"] in {"READY_FOR_CISO_INFORMATION", "INSUFFICIENT_EVIDENCE"}
 
 
 def test_tc20_high_or_critical_routes_to_ciso_decision(mcp):

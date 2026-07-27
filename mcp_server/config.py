@@ -36,15 +36,13 @@ class MCPConfig:
     # Fallback shared model, used by any role whose own env var isn't set.
     ollama_model: str = field(default_factory=lambda: os.environ.get("OLLAMA_MODEL", "llama3.1"))
 
-    # Per-role model overrides — each role can run a different local model.
-    # qwen2.5:7b-instruct backs both the Generator and the Validator: it
-    # follows explicit business rules (e.g. the HIGH-risk ->
-    # requires_ciso_approval=true rule) more reliably than llama3.1 did in
-    # testing. llama3.1 stays on the Verifier, the hardest role, as the
-    # baseline to compare against.
+    # Per-role model overrides for the two roles that are still genuinely
+    # LLM-backed. There is no validator_model / VALIDATOR_OLLAMA_MODEL: the
+    # Validator (mcp_server/llm_roles/policy_validator.py) is a deterministic
+    # policy engine with no LLM call at all, so a model knob for it would be
+    # dead configuration. It was removed rather than kept-but-unused.
     generator_model: str = field(default_factory=lambda: os.environ.get("GENERATOR_OLLAMA_MODEL", "qwen2.5:7b-instruct"))
     verifier_model: str = field(default_factory=lambda: os.environ.get("VERIFIER_OLLAMA_MODEL", "llama3.1"))
-    validator_model: str = field(default_factory=lambda: os.environ.get("VALIDATOR_OLLAMA_MODEL", "qwen2.5:7b-instruct"))
 
     def __post_init__(self):
         if self.llm_mode not in SUPPORTED_LLM_MODES:
