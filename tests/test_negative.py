@@ -45,13 +45,16 @@ def test_tc07_evidence_missing_required_field_rejected():
     assert any("integrity_hash" in e.message for e in errors)
 
 
-def test_tc08_contradictory_evidence_yields_human_review(mcp):
-    """TC-08 — Evidence favorable + contradictoire => status=contradicted, contradicting_evidence renseigne."""
+def test_tc08_contradictory_evidence_routes_to_ciso_decision(mcp):
+    """TC-08 — Evidence favorable + contradictoire => status=contradicted, contradicting_evidence
+    renseigne, routage READY_FOR_CISO_DECISION (jamais HUMAN_REVIEW : le CISO est la seule
+    autorite humaine de decision de ce pipeline)."""
     result = mcp.process_request(make_request(["EVD-0004", "EVD-0005"]))
     assert result["mcp_state"] == "COMPLETED"
     assert result["verification_result"]["status"] == "contradicted"
     assert result["verification_result"]["contradicting_evidence"]
-    assert result["validation_decision"]["decision"] == "HUMAN_REVIEW"
+    assert result["validation_decision"]["decision"] == "READY_FOR_CISO_DECISION"
+    assert result["validation_decision"]["requires_ciso_approval"] is True
 
 
 def test_tc09_insufficient_evidence_flagged(mcp):

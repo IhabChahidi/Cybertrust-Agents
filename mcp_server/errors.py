@@ -23,6 +23,7 @@ class EventCode(str, Enum):
     LLM_TIMEOUT = "LLM_TIMEOUT"
     LLM_EMPTY_RESPONSE = "LLM_EMPTY_RESPONSE"
     LLM_PROVIDER_ERROR = "LLM_PROVIDER_ERROR"
+    LLM_OUTPUT_VALIDATION_FAILED = "LLM_OUTPUT_VALIDATION_FAILED"
     EVIDENCE_CATALOG_UNAVAILABLE = "EVIDENCE_CATALOG_UNAVAILABLE"
     AUDIT_UNAVAILABLE = "AUDIT_UNAVAILABLE"
     SCORING_ENGINE_ERROR = "SCORING_ENGINE_ERROR"
@@ -44,3 +45,16 @@ class MCPTechnicalFailure(Exception):
         self.code = code
         self.detail = detail
         super().__init__(f"{code.value}: {detail}")
+
+
+class LLMOutputContractViolation(RuntimeError):
+    """Raised by an LLM-backed role adapter (llama_generator.py, llama_verifier.py, ...)
+    when the model's output is schema-valid JSON but violates a business-level
+    contract the schema itself cannot express — e.g. a Generator Claim phrased as a
+    question, or containing multiple sentences. Deliberately a plain RuntimeError
+    subclass, NOT MCPBlockedError/MCPTechnicalFailure: the orchestrator's existing
+    retry loop (_invoke_role) is meant to catch and retry this like any other
+    transient provider misbehavior, giving the model another chance before the
+    pipeline fails closed. See orchestrator._invoke_role for where this is
+    distinguished from a generic provider error for audit-log clarity.
+    """

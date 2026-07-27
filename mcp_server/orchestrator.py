@@ -1,7 +1,15 @@
 """MCP server orchestrator: the state machine described in L4.
 
 INIT -> VALIDATION_ENTREE -> SELECTION_EVIDENCE -> GENERATION_CLAIM ->
-VERIFICATION -> SCORING -> VALIDATION -> DECISION_CISO -> COMPLETED
+VERIFICATION -> DIAGNOSTICS -> SCORING -> VALIDATION -> DECISION_CISO -> COMPLETED
+
+Governance constraint: the CISO is the sole human decision authority in this
+pipeline. There is no separate "human review" role and no HUMAN_REVIEW status
+anywhere. Only two stages are LLM-backed (GENERATION_CLAIM, VERIFICATION);
+DIAGNOSTICS and VALIDATION are both fully deterministic — see
+mcp_server/diagnostics.py and mcp_server/policy.py. DIAGNOSTICS computes
+advisory warning codes from Evidence content and NEVER rewrites
+VerificationResult.status; the Verifier LLM remains its sole author.
 
 Any blocking violation moves the session to BLOCKED; any non-malicious
 provider/technical error moves it to TECHNICAL_FAILURE. Reaching COMPLETED
@@ -22,7 +30,8 @@ from typing import Any
 from jsonschema import Draft7Validator
 
 from mcp_server.config import ENDPOINT_WHITELIST, MCPConfig
-from mcp_server.errors import EventCode, MCPBlockedError, MCPTechnicalFailure
+from mcp_server.diagnostics import compute_diagnostic_details, compute_diagnostics
+from mcp_server.errors import EventCode, LLMOutputContractViolation, MCPBlockedError, MCPTechnicalFailure
 from mcp_server.llm_roles.factory import build_generator, build_validator, build_verifier
 from mcp_server.logging_utils import AuditLogger
 from mcp_server.scoring import compute_mcp_score
@@ -128,6 +137,11 @@ class MCPServer:
 
         if isinstance(last_exc, TimeoutError):
             raise MCPTechnicalFailure(EventCode.LLM_TIMEOUT, f"{role_name} timed out after {attempts} attempt(s)")
+        if isinstance(last_exc, LLMOutputContractViolation):
+            raise MCPTechnicalFailure(
+                EventCode.LLM_OUTPUT_VALIDATION_FAILED,
+                f"{role_name} produced contract-violating output after {attempts} attempt(s): {last_exc}",
+            )
         raise MCPTechnicalFailure(EventCode.LLM_PROVIDER_ERROR, f"{role_name} failed after {attempts} attempt(s): {last_exc}")
 
     def process_request(self, request: dict) -> dict:
@@ -146,6 +160,8 @@ class MCPServer:
         # e.g. a HIGH-risk MCPScore that a misbehaving Validator then failed to
         # flag for CISO approval is valuable diagnostic context, not garbage.
         claim = verification_result = mcp_score = decision = None
+        diagnostic_warnings: list[str] = []
+        diagnostic_details: list[dict] = []
 
         try:
             session.state = "VALIDATION_ENTREE"
@@ -160,11 +176,14 @@ class MCPServer:
             session.state = "VERIFICATION"
             verification_result = self._verification(session, claim, evidence)
 
+            session.state = "DIAGNOSTICS"
+            diagnostic_warnings, diagnostic_details = self._diagnostics(session, evidence, verification_result)
+
             session.state = "SCORING"
             mcp_score = self._scoring(session, evidence, verification_result)
 
             session.state = "VALIDATION"
-            decision = self._validation(session, verification_result, mcp_score)
+            decision = self._validation(session, verification_result, mcp_score, diagnostic_warnings, diagnostic_details)
 
             session.state = "DECISION_CISO"
             ciso_routing = self._decision_ciso(session, decision)
@@ -199,6 +218,8 @@ class MCPServer:
                 "partial": {
                     "claim": claim,
                     "verification_result": verification_result,
+                    "diagnostic_warnings": diagnostic_warnings,
+                    "diagnostic_details": diagnostic_details,
                     "mcp_score": mcp_score,
                     "validation_decision": decision,
                 },
@@ -220,6 +241,8 @@ class MCPServer:
                 "partial": {
                     "claim": claim,
                     "verification_result": verification_result,
+                    "diagnostic_warnings": diagnostic_warnings,
+                    "diagnostic_details": diagnostic_details,
                     "mcp_score": mcp_score,
                     "validation_decision": decision,
                 },
@@ -313,6 +336,20 @@ class MCPServer:
                    detail=f"{verification_result['id']}:{verification_result['status']}")
         return verification_result
 
+    def _diagnostics(self, session: MCPSession, evidence: list[dict], verification_result: dict) -> tuple[list[str], list[dict]]:
+        """Deterministic advisory warnings derived from Evidence content
+        (mcp_server.diagnostics). Never rewrites verification_result["status"] —
+        the Verifier LLM remains its sole author; this stage only ever reads it,
+        never assigns back to it. Returns (codes, structured details) — both
+        derived from the same computation (mcp_server.diagnostics), so they can
+        never drift apart.
+        """
+        warnings = compute_diagnostics(evidence, verification_result["status"])
+        details = compute_diagnostic_details(evidence, verification_result["status"])
+        self._log(session, event_type="DIAGNOSTICS", role="MCP", result="OK",
+                   detail=f"warnings={warnings}" if warnings else "no warnings")
+        return warnings, details
+
     def _scoring(self, session: MCPSession, evidence: list[dict], verification_result: dict) -> dict:
         mcp_score = compute_mcp_score(
             evidence=evidence, verification_result=verification_result,
@@ -328,13 +365,19 @@ class MCPServer:
                    detail=f"{mcp_score['id']}:{mcp_score['value']}:{mcp_score['risk_level']}")
         return mcp_score
 
-    def _validation(self, session: MCPSession, verification_result: dict, mcp_score: dict) -> dict:
+    def _validation(self, session: MCPSession, verification_result: dict, mcp_score: dict,
+                     diagnostic_warnings: list[str], diagnostic_details: list[dict]) -> dict:
         decision = self._invoke_role(
             "VALIDATOR", self.validator.validate,
             verification_result=verification_result, mcp_score=mcp_score,
+            diagnostic_warnings=diagnostic_warnings,
             decision_id=self._next_id("VAL"), session_id=session.session_id,
             correlation_id=session.correlation_id,
         )
+        # Structured companion to diagnostic_warnings, attached here (not inside
+        # the Validator itself) since it is pure audit detail already computed in
+        # the DIAGNOSTICS stage — not something the Validator's own logic needs.
+        decision["diagnostic_details"] = diagnostic_details
         _schema_check("ValidationDecision", decision, role="VALIDATOR")
 
         if decision["verification_result_id"] != verification_result["id"]:
@@ -342,25 +385,43 @@ class MCPServer:
         if decision["mcp_score_reference"] != mcp_score["id"]:
             raise MCPBlockedError(EventCode.INVALID_SCORE_REFERENCE, "ValidationDecision.mcp_score_reference mismatch")
 
-        if mcp_score["risk_level"] in ("HIGH", "CRITICAL") and not decision["requires_ciso_approval"]:
-            raise MCPBlockedError(EventCode.CISO_APPROVAL_REQUIRED, "HIGH/CRITICAL risk without requires_ciso_approval=true")
+        # Risk-level floor: a "supported" Claim at HIGH/CRITICAL risk must always
+        # require CISO approval. Scoped to status=="supported" deliberately —
+        # insufficient_evidence and unsupported must NOT be escalated by risk_level
+        # (MCPScore must never "compensate" for missing Evidence into a false
+        # sense of urgency, or the reverse); those two statuses have their own
+        # fixed routing in mcp_server/policy.py regardless of risk_level.
+        if (verification_result["status"] == "supported" and mcp_score["risk_level"] in ("HIGH", "CRITICAL")
+                and not decision["requires_ciso_approval"]):
+            raise MCPBlockedError(
+                EventCode.CISO_APPROVAL_REQUIRED, "supported + HIGH/CRITICAL risk without requires_ciso_approval=true",
+            )
 
-        self._log(session, event_type="VALIDATION", role="VALIDATOR", result="OK", detail=decision["decision"])
+        # Governance invariant: READY_FOR_CISO_DECISION always means mandatory
+        # CISO sign-off. If a Validator implementation ever produced that
+        # decision without the approval flag, that would silently understate how
+        # urgent the case is — block rather than let it through quietly.
+        if decision["decision"] == "READY_FOR_CISO_DECISION" and not decision["requires_ciso_approval"]:
+            raise MCPBlockedError(
+                EventCode.CISO_APPROVAL_REQUIRED, "READY_FOR_CISO_DECISION without requires_ciso_approval=true",
+            )
+
+        self._log(
+            session, event_type="VALIDATION", role="VALIDATOR", result="OK",
+            detail=(
+                f"decision={decision['decision']} policy_rule={decision.get('policy_rule')} "
+                f"policy_version={decision.get('policy_version')} applied_exception={decision.get('applied_exception')}"
+            ),
+        )
         return decision
 
     def _decision_ciso(self, session: MCPSession, decision: dict) -> str:
-        # Keyed off the ValidationDecision, not the raw MCPScore: a HUMAN_REVIEW
-        # (contradiction) or any requires_ciso_approval=true dossier needs the
-        # CISO regardless of the numeric score (L5 "Désaccord..." exception).
-        if decision["decision"] == "REJECTED":
-            routing = "CLOSED_REJECTED"
-        elif decision["decision"] == "INSUFFICIENT_EVIDENCE":
-            routing = "CLOSED_INSUFFICIENT_EVIDENCE"
-        elif decision["decision"] == "HUMAN_REVIEW" or decision["requires_ciso_approval"]:
-            routing = "READY_FOR_CISO_DECISION"
-        else:
-            routing = "READY_FOR_CISO_INFORMATION"
-
+        # The ValidationDecision's `decision` field IS the routing value now
+        # (READY_FOR_CISO_DECISION / READY_FOR_CISO_INFORMATION / REJECTED /
+        # INSUFFICIENT_EVIDENCE — see mcp_server/policy.py) — there is nothing
+        # left to re-derive here. This stage is kept only for the audit-log
+        # entry and to preserve the `ciso_routing` field existing callers read.
+        routing = decision["decision"]
         self._log(session, event_type="DECISION_CISO", role="MCP", result="OK", detail=routing)
         return routing
 

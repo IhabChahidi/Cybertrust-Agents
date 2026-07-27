@@ -62,7 +62,7 @@ class RealValidator(Validator):
     def __init__(self, config: MCPConfig):
         self.config = config
 
-    def validate(self, *, verification_result, mcp_score, decision_id, session_id, correlation_id):
+    def validate(self, *, verification_result, mcp_score, diagnostic_warnings, decision_id, session_id, correlation_id):
         raise MCPTechnicalFailure(
             EventCode.LLM_PROVIDER_ERROR,
             "RealValidator is not wired yet — no external LLM access. Use MCP_LLM_MODE=mock.",

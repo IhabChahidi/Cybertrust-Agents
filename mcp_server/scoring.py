@@ -14,6 +14,8 @@ version's logic available for reproducibility (L5 section 10).
 
 from datetime import datetime, timezone
 
+from mcp_server.evidence_parsing import fields_marked_absent
+
 CALCULATION_VERSION = "1.0"
 
 _SEVERITY_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
@@ -40,8 +42,11 @@ def _evidence_quality(evidence: list[dict]) -> float:
         quality += 3.0
     if any(e["content"].get("indicators") for e in evidence):
         quality += 3.0
-    raw_all = " ".join(e["content"]["raw_data"].lower() for e in evidence)
-    absent_hits = raw_all.count("absent")
+    # Parsed, exact field-value count — not a substring search across raw_data.
+    # A naive `"absent" in raw_data` check fires on a comment or quoted example
+    # containing the word "absent" just as happily as on an actual
+    # `field=absent` pair; see mcp_server/evidence_parsing.py.
+    absent_hits = sum(len(fields_marked_absent(e)) for e in evidence)
     quality -= min(6.0, absent_hits * 3.0)
     if len(evidence) > 1:
         quality += 3.0  # correlation bonus: multiple independent Evidence (L5 "Corrélation")

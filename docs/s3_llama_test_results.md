@@ -1,5 +1,15 @@
 # S3 — Real-LLM Test Results (llama3.1 via Ollama)
 
+> **Historical snapshot.** This document records test results from before the
+> CISO-only routing redesign: `HUMAN_REVIEW` and `APPROVED_FOR_CISO_REVIEW`
+> below are decision values this pipeline produced *at the time* and no longer
+> produces (see `mcp_server/policy.py` — the current values are
+> `READY_FOR_CISO_DECISION` / `READY_FOR_CISO_INFORMATION` / `REJECTED` /
+> `INSUFFICIENT_EVIDENCE`). Also historical: the Validator described here was
+> still LLM-backed; it is now `mcp_server/llm_roles/policy_validator.py`, a
+> deterministic policy engine with no LLM call. Left as-is intentionally as a
+> record of what was actually observed at the time, not updated in place.
+
 Mode `mock` (S3 initial) uses deterministic keyword heuristics — it proves the
 MCP's routing, scoring, and blocking logic work, but says nothing about how a
 *real* LLM behaves in the Generator/Verifier/Validator roles. This pass wires
