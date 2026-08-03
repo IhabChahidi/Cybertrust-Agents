@@ -1,0 +1,6 @@
+# Development-only tooling (spec: "Add required dependencies to the
+# appropriate development requirements file"). Not required to run the
+# application or its test suite -- only for `ruff check` / `mypy`, scoped
+# per ruff.toml / mypy.ini to the new Generator/RAG modules.
+ruff==0.16.0
+mypy==2.3.0

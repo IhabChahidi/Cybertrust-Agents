@@ -1,0 +1,23 @@
+# No requirements.txt existed in this repo before (see reports/CyberTrust_Agents_Actual_State_Report.docx,
+# section on dependency management) -- this file is new, pinned to the
+# versions verified to work in the development interpreter, so
+# `docker-compose build` has a reproducible dependency set for the new
+# generator-api service. It is additive: nothing in the existing pipeline
+# (mock/Ollama modes) requires anything beyond fastapi/uvicorn/pydantic/
+# python-dotenv/PyYAML/jsonschema/python-docx, which were already imported
+# by the codebase before this task.
+
+fastapi==0.139.2
+uvicorn==0.51.0
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
+PyYAML==6.0.3
+jsonschema==4.26.0
+python-docx==1.2.0
+httpx==0.28.1
+
+# RAG layer (mcp_server/rag/) -- CPU-only, no external embedding/LLM API.
+chromadb==1.5.9
+sentence-transformers==5.6.1
+torch==2.13.0

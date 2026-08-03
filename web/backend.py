@@ -26,8 +26,15 @@ from pydantic import BaseModel
 from mcp_server.config import ENDPOINT_WHITELIST, MCPConfig, SUPPORTED_LLM_MODES
 from mcp_server.orchestrator import MCPServer
 from web import auth
+from web.generator_api import health_router
+from web.generator_api import router as generator_router
 
 app = FastAPI(title="CyberTrust Agents — MCP Dashboard")
+
+# New Generator/RAG API surface (spec sections 6, 12, 13): X-API-Key auth,
+# fully separate from the CISO dashboard's session-cookie auth above.
+app.include_router(generator_router)
+app.include_router(health_router)
 
 # One long-lived MCPServer per LLM mode, so audit history and CISO decisions
 # accumulate in-memory across requests instead of being recreated each time.

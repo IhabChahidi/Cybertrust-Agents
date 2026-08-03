@@ -1,0 +1,503 @@
+<title>CyberTrust Agents — Chain Architecture</title>
+<style>
+  :root {
+    --bg: #eef2f3;
+    --surface: #ffffff;
+    --surface-2: #e4e9ea;
+    --ink: #16232a;
+    --muted: #55707a;
+    --line: #c9d3d5;
+    --accent: #1c6e8c;
+    --accent-ink: #ffffff;
+    --accent-soft: #dcedf2;
+    --net: #b9791f;
+    --net-soft: #f7ecd9;
+    --pure: #2f8f66;
+    --pure-soft: #dff2e8;
+    --optional: #8452a8;
+    --optional-soft: #ede1f4;
+    --code-bg: #eef2f4;
+    --shadow: 0 1px 2px rgba(20,40,48,0.06), 0 8px 24px -12px rgba(20,40,48,0.18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101720;
+      --surface: #16202a;
+      --surface-2: #1c2733;
+      --ink: #e7eef1;
+      --muted: #90a8b2;
+      --line: #2b3a45;
+      --accent: #5fb9d9;
+      --accent-ink: #06222b;
+      --accent-soft: #17323c;
+      --net: #d9a34a;
+      --net-soft: #2c2413;
+      --pure: #5fcf9c;
+      --pure-soft: #12271e;
+      --optional: #b98ee0;
+      --optional-soft: #251c33;
+      --code-bg: #101a22;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -14px rgba(0,0,0,0.6);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101720; --surface: #16202a; --surface-2: #1c2733; --ink: #e7eef1;
+    --muted: #90a8b2; --line: #2b3a45; --accent: #5fb9d9; --accent-ink: #06222b;
+    --accent-soft: #17323c; --net: #d9a34a; --net-soft: #2c2413; --pure: #5fcf9c;
+    --pure-soft: #12271e; --optional: #b98ee0; --optional-soft: #251c33; --code-bg: #101a22;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 12px 32px -14px rgba(0,0,0,0.6);
+  }
+  :root[data-theme="light"] {
+    --bg: #eef2f3; --surface: #ffffff; --surface-2: #e4e9ea; --ink: #16232a;
+    --muted: #55707a; --line: #c9d3d5; --accent: #1c6e8c; --accent-ink: #ffffff;
+    --accent-soft: #dcedf2; --net: #b9791f; --net-soft: #f7ecd9; --pure: #2f8f66;
+    --pure-soft: #dff2e8; --optional: #8452a8; --optional-soft: #ede1f4; --code-bg: #eef2f4;
+    --shadow: 0 1px 2px rgba(20,40,48,0.06), 0 8px 24px -12px rgba(20,40,48,0.18);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font-family: ui-sans-serif, "Segoe UI", "IBM Plex Sans", -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+  code, .code, .ref, .mermaid { font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace; }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+
+  header.page {
+    padding-bottom: 2rem;
+    margin-bottom: 2.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .eyebrow {
+    font-family: ui-monospace, "Cascadia Code", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1 {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", monospace;
+    font-size: clamp(1.6rem, 2.4vw, 2.1rem);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0.5rem 0 0.6rem;
+    text-wrap: balance;
+  }
+  header.page p { color: var(--muted); max-width: 65ch; margin: 0; font-size: 1.02rem; }
+
+  h2 {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", monospace;
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin: 0 0 0.35rem;
+    text-wrap: balance;
+  }
+  .section-intro { color: var(--muted); max-width: 68ch; margin: 0 0 1.6rem; }
+  section.block { margin-bottom: 3.5rem; }
+  .section-num {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.9rem 1.1rem;
+    margin: 1rem 0 1.8rem;
+    font-size: 0.94rem;
+  }
+  .callout strong { color: var(--accent); }
+
+  .diagram-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.4rem;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+    margin-bottom: 1.6rem;
+  }
+  .mermaid { min-width: 620px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1.2rem; margin: 0 0 1.6rem; font-size: 0.85rem; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+  .swatch { width: 0.7rem; height: 0.7rem; border-radius: 2px; display: inline-block; }
+
+  .stage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.9rem; }
+  .stage {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    position: relative;
+  }
+  .stage .idx {
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+  }
+  .stage h3 {
+    font-family: ui-monospace, monospace;
+    font-size: 0.98rem;
+    margin: 0.25rem 0 0.5rem;
+    color: var(--accent);
+  }
+  .stage p { margin: 0 0 0.55rem; font-size: 0.9rem; color: var(--ink); }
+  .stage .ref {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--muted);
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 0.35rem 0.5rem;
+    word-break: break-word;
+  }
+  .stage.branch { border-left: 3px solid var(--net); }
+  .stage.branch h3 { color: var(--net); }
+
+  table.ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  table.ref-table th, table.ref-table td {
+    text-align: left;
+    padding: 0.65rem 0.8rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  table.ref-table thead th {
+    background: var(--surface-2);
+    font-family: ui-monospace, monospace;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  table.ref-table tbody tr:last-child td { border-bottom: none; }
+  table.ref-table td.file { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--ink); }
+  .tag {
+    display: inline-block;
+    font-family: ui-monospace, monospace;
+    font-size: 0.7rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .tag.pure { background: var(--pure-soft); color: var(--pure); }
+  .tag.net { background: var(--net-soft); color: var(--net); }
+  .tag.optional { background: var(--optional-soft); color: var(--optional); }
+
+  .table-wrap { overflow-x: auto; }
+
+  footer.page { margin-top: 3rem; padding-top: 1.4rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 2rem 1rem 3rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="page">
+    <span class="eyebrow">CyberTrust Agents · MCP SecOps pilot</span>
+    <h1>Foundation-Sec + RAG + Verifier + Validator — how the chain actually runs</h1>
+    <p>Two diagrams: first the request's journey through the state machine, stage by stage; then where every
+    piece of code physically executes — which Docker container, which function, and which external tool (if any)
+    it calls. Built from the live <code class="mono">/api/v1/generator/verified-claims</code> run against the
+    deployed Swarm stack.</p>
+  </header>
+
+  <section class="block" id="workflow">
+    <span class="section-num">01 / diagram</span>
+    <h2>Request lifecycle</h2>
+    <p class="section-intro">
+      This is what happens inside one call to <code class="mono">POST /api/v1/generator/verified-claims</code>.
+      Foundation-Sec generates and grounds a claim first; only if it actually produces one does the claim enter
+      the orchestrator's state machine (<code class="mono">MCPServer.process_claim()</code>,
+      <span class="ref mono" style="display:inline;padding:0;background:none;">mcp_server/orchestrator.py:176</span>).
+    </p>
+
+    <div class="callout">
+      <strong>Short-circuit that matters:</strong> if Foundation-Sec can't find corporate evidence linked to the
+      question (only reference intel like a CVE description, no matching case/ticket/asset), it returns
+      <code class="mono">INSUFFICIENT_EVIDENCE</code> on its own — by contract, this never reaches the Verifier or
+      Validator at all. Reference knowledge alone is never treated as proof of organizational exposure.
+    </div>
+
+    <div class="diagram-card">
+      <pre class="mermaid">
+flowchart TD
+    Q(["Question + case_id / ticket_id / asset_id"]) --> GEN["Foundation-Sec generator + RAG retrieval<br/><span style='font-size:11px'>generate_claim() · generator_service.py:61</span>"]
+    GEN -->|"no linked evidence found"| SHORT[["INSUFFICIENT_EVIDENCE<br/>returned immediately — Verifier &amp; Validator never run"]]
+    GEN -->|"CLAIM_GENERATED"| INIT["INIT<br/><span style='font-size:11px'>session created, claim_id assigned</span>"]
+    INIT --> SEL["SELECTION_EVIDENCE<br/><span style='font-size:11px'>schema-check claim · resolve evidence_ids</span>"]
+    SEL --> VER["VERIFICATION<br/><span style='font-size:11px'>Verifier compares claim against evidence</span>"]
+    VER --> DIAG["DIAGNOSTICS<br/><span style='font-size:11px'>rule scan: ambiguous / low-coverage / contradicted</span>"]
+    DIAG --> SCORE["SCORING<br/><span style='font-size:11px'>compute_mcp_score() → 0–100, risk_level</span>"]
+    SCORE --> VAL["VALIDATION<br/><span style='font-size:11px'>policy.decide() applies routing rules</span>"]
+    VAL --> CISO["DECISION_CISO<br/><span style='font-size:11px'>invariant guards · routes to a human CISO</span>"]
+    CISO --> DONE(["COMPLETED<br/>full result assembled + journaled"])
+
+    classDef pure fill:#dff2e8,stroke:#2f8f66,color:#184430,font-weight:600;
+    classDef branch fill:#f7ecd9,stroke:#b9791f,color:#5c3d0d,font-weight:600;
+    classDef terminal fill:#dcedf2,stroke:#1c6e8c,color:#0d3a48,font-weight:600;
+    class GEN,SEL,VER,DIAG,SCORE,VAL,CISO pure;
+    class SHORT branch;
+    class Q,INIT,DONE terminal;
+      </pre>
+    </div>
+
+    <div class="stage-grid">
+      <div class="stage">
+        <span class="idx">STAGE 0</span>
+        <h3>Foundation-Sec + RAG</h3>
+        <p>The 8B model, run through llama.cpp, retrieves its own context from ChromaDB and drafts a claim. If no
+        corporate evidence is linked to the question, it stops here.</p>
+        <span class="ref">mcp_server/generator_service.py:61 <b>generate_claim()</b></span>
+      </div>
+      <div class="stage branch">
+        <span class="idx">BRANCH</span>
+        <h3>INSUFFICIENT_EVIDENCE</h3>
+        <p>Authority-separation guardrail: reference intel (a CVE description) is never enough on its own. Returned
+        as-is; the rest of the pipeline is skipped entirely.</p>
+        <span class="ref">web/generator_api.py — status != CLAIM_GENERATED check</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 1</span>
+        <h3>INIT</h3>
+        <p>A fresh <code>MCPSession</code> is created for the claim; session/correlation IDs and a
+        <code>CLM-####</code> id are assigned.</p>
+        <span class="ref">mcp_server/orchestrator.py:86 MCPSession · :176 process_claim()</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 2</span>
+        <h3>SELECTION_EVIDENCE</h3>
+        <p>The claim is schema-checked, then its cited evidence_ids are resolved against the evidence catalogue —
+        the actual Evidence records get pulled in.</p>
+        <span class="ref">orchestrator.py:204 _schema_check() · :207 _select_evidence()</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 3</span>
+        <h3>VERIFICATION</h3>
+        <p>The Verifier checks the claim against its evidence for contradictions or missing fields, and returns
+        supported / contradicted / insufficient.</p>
+        <span class="ref">orchestrator.py:230 _verification() → self.verifier.verify()</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 4</span>
+        <h3>DIAGNOSTICS</h3>
+        <p>Deterministic rule scan flags things like a "closed" status with no proof field, or a conclusion resting
+        on a single evidence item.</p>
+        <span class="ref">orchestrator.py:233 _diagnostics()</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 5</span>
+        <h3>SCORING</h3>
+        <p>A 0–100 MCP Score is computed from fixed point tables — severity, exposure, impact, evidence quality,
+        verification, contradiction penalty — yielding a risk_level.</p>
+        <span class="ref">mcp_server/scoring.py:64 compute_mcp_score()</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 6</span>
+        <h3>VALIDATION</h3>
+        <p>A pure policy function reads the verification status + risk_level and applies fixed routing rules (plus
+        optional local overrides) to decide what happens next.</p>
+        <span class="ref">mcp_server/policy.py:220 decide()</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 7</span>
+        <h3>DECISION_CISO</h3>
+        <p>Invariant guards double-check the routing (e.g. a risk-level floor), then the claim is routed toward a
+        human CISO decision — this stage never auto-approves anything.</p>
+        <span class="ref">orchestrator.py:438–486 _validation() guards</span>
+      </div>
+      <div class="stage">
+        <span class="idx">STAGE 8</span>
+        <h3>COMPLETED</h3>
+        <p>The full result — claim, verification_result, mcp_score, validation_decision, ciso_routing, and the
+        transitions list — is assembled and journaled to disk.</p>
+        <span class="ref">journal_verified_claims_{mode}.jsonl (inside the container, not volume-mounted)</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="topology">
+    <span class="section-num">02 / diagram</span>
+    <h2>System topology — who runs where</h2>
+    <p class="section-intro">
+      The short version: there is <strong>no separate Verifier or Validator container</strong>. Only two things in
+      this stack are actual network services — ChromaDB and llama.cpp. Everything else, including the whole
+      orchestrator, Verifier, and Validator, is plain Python running inside the single
+      <code class="mono">generator-api</code> container.
+    </p>
+
+    <div class="legend">
+      <span><span class="swatch" style="background:var(--pure)"></span> in-process, no network call</span>
+      <span><span class="swatch" style="background:var(--net)"></span> real HTTP call, part of this stack</span>
+      <span><span class="swatch" style="background:var(--optional)"></span> optional path, not deployed here</span>
+    </div>
+
+    <div class="diagram-card">
+      <pre class="mermaid">
+flowchart LR
+    C(["Caller<br/>CISO dashboard / test script"])
+
+    subgraph GAPI["generator-api container — built from ./Dockerfile — port 8000 published"]
+      direction TB
+      API["FastAPI app<br/><span style='font-size:11px'>web/backend.py · web/generator_api.py</span>"]
+      GENSVC["generate_claim()<br/><span style='font-size:11px'>mcp_server/generator_service.py:61</span>"]
+      RAGC["ChromaCollections<br/><span style='font-size:11px'>mcp_server/rag/chroma_client.py:23</span>"]
+      LLMC["chat_completion()<br/><span style='font-size:11px'>mcp_server/llm_roles/llamacpp_client.py</span>"]
+      ADAPT["to_mcp_claim()<br/><span style='font-size:11px'>mcp_server/generator_claims.py</span>"]
+      ORCH["MCPServer.process_claim()<br/><span style='font-size:11px'>mcp_server/orchestrator.py:176</span>"]
+      VERI["Verifier<br/><span style='font-size:11px'>llm_roles/factory.py:35 build_verifier()</span>"]
+      SCORE["compute_mcp_score()<br/><span style='font-size:11px'>mcp_server/scoring.py:64</span>"]
+      VALI["Validator → policy.decide()<br/><span style='font-size:11px'>llm_roles/policy_validator.py · mcp_server/policy.py:220</span>"]
+
+      API --> GENSVC
+      GENSVC --> RAGC
+      GENSVC --> LLMC
+      GENSVC --> ADAPT
+      ADAPT --> ORCH
+      ORCH --> VERI
+      ORCH --> SCORE
+      ORCH --> VALI
+    end
+
+    subgraph CHROMA["chromadb container<br/>image: chromadb/chroma:0.5.20 — internal network only"]
+      CDB[("vector store<br/>4 controlled collections")]
+    end
+
+    subgraph LLAMA["llama-generator container<br/>image: ghcr.io/ggml-org/llama.cpp:server — internal network only"]
+      LCPP[["Foundation-Sec-8B-Instruct<br/>Q4_K_M.gguf"]]
+    end
+
+    subgraph OLLAMA["Ollama — optional, NOT part of this docker-compose stack"]
+      OLL{{"localhost:11434<br/>only reached if llm_mode = llama"}}
+    end
+
+    C -->|"POST :8000 /api/v1/generator/verified-claims"| API
+    RAGC -->|"HTTP :8000, internal network"| CDB
+    LLMC -->|"HTTP :8080, internal network"| LCPP
+    VERI -.->|"HTTP :11434 — llm_mode=llama only"| OLL
+
+    classDef pure fill:#dff2e8,stroke:#2f8f66,color:#184430,font-weight:600;
+    classDef svc fill:#dcedf2,stroke:#1c6e8c,color:#0d3a48,font-weight:600;
+    classDef opt fill:#ede1f4,stroke:#8452a8,color:#3a2050,font-weight:600,stroke-dasharray: 4 3;
+    class API,GENSVC,ADAPT,ORCH,SCORE pure;
+    class VERI,VALI pure;
+    class RAGC,LLMC svc;
+    class CDB,LCPP svc;
+    class OLL,OLLAMA opt;
+      </pre>
+    </div>
+
+    <div class="callout">
+      <strong>Why there's no "Verifier container" or "Validator container" to find:</strong> both are selected by
+      <code class="mono">mcp_server/llm_roles/factory.py</code>'s <code class="mono">build_verifier()</code> /
+      <code class="mono">build_validator()</code> and instantiated once inside
+      <code class="mono">MCPServer.__init__</code>. With <code class="mono">llm_mode="mock"</code> (what we've been
+      running), the Verifier is <code class="mono">MockVerifier</code> — pure Python contradiction-checking, zero
+      network calls — and the Validator is <code class="mono">PolicyValidator</code>, which calls no LLM either:
+      it reads <code class="mono">config/policy_rules.yaml</code> (baked into the image) and applies fixed rule
+      tables. The only way a Verifier ever makes a network call is <code class="mono">llm_mode="llama"</code>,
+      which talks to a local <b>Ollama</b> server — a completely different dependency from the
+      <code class="mono">llama-generator</code> container, and not defined anywhere in
+      <code class="mono">docker-compose.yml</code>.
+    </div>
+
+    <div class="table-wrap">
+      <table class="ref-table">
+        <thead>
+          <tr><th>Component</th><th>Implemented at</th><th>Runs in</th><th>Calls out to</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Orchestrator / state machine</td>
+            <td class="file">orchestrator.py:93 <b>MCPServer</b><br/>process_claim() :176 · _run_chain_from_claim() :215</td>
+            <td>generator-api container</td>
+            <td><span class="tag pure">none</span></td>
+          </tr>
+          <tr>
+            <td>Generator (Foundation-Sec + RAG)</td>
+            <td class="file">llm_roles/foundation_sec_generator.py:44<br/>→ generator_service.py:61 <b>generate_claim()</b></td>
+            <td>generator-api container</td>
+            <td><span class="tag net">chromadb :8000</span> <span class="tag net">llama-generator :8080</span></td>
+          </tr>
+          <tr>
+            <td>RAG / ChromaDB client</td>
+            <td class="file">rag/chroma_client.py:23 <b>ChromaCollections</b><br/>rag/retrieval.py <b>retrieve()</b></td>
+            <td>generator-api container (client side)</td>
+            <td><span class="tag net">HTTP → chromadb container</span></td>
+          </tr>
+          <tr>
+            <td>Verifier — mock (in use)</td>
+            <td class="file">llm_roles/factory.py:35 build_verifier()<br/>→ llm_roles/mock_verifier.py:18 <b>MockVerifier</b></td>
+            <td>generator-api container</td>
+            <td><span class="tag pure">none — pure Python</span></td>
+          </tr>
+          <tr>
+            <td>Verifier — llama mode (optional, unused)</td>
+            <td class="file">llm_roles/llama_verifier.py:96 <b>LlamaVerifier</b><br/>→ ollama_client.py call_ollama()</td>
+            <td>generator-api container</td>
+            <td><span class="tag optional">HTTP → Ollama, not in compose</span></td>
+          </tr>
+          <tr>
+            <td>Validator</td>
+            <td class="file">llm_roles/factory.py:43 build_validator()<br/>→ policy_validator.py:29 → mcp_server/policy.py:220 <b>decide()</b></td>
+            <td>generator-api container</td>
+            <td><span class="tag pure">none — reads local config/policy_rules.yaml</span></td>
+          </tr>
+          <tr>
+            <td>Scorer (MCP Score)</td>
+            <td class="file">mcp_server/scoring.py:64 <b>compute_mcp_score()</b></td>
+            <td>generator-api container</td>
+            <td><span class="tag pure">none — pure arithmetic</span></td>
+          </tr>
+          <tr>
+            <td>llama.cpp server</td>
+            <td class="file">docker-compose.yml service <b>llama-generator</b><br/>ghcr.io/ggml-org/llama.cpp:server</td>
+            <td>its own container</td>
+            <td><span class="tag net">n/a — this is the dependency being called</span></td>
+          </tr>
+          <tr>
+            <td>ChromaDB</td>
+            <td class="file">docker-compose.yml service <b>chromadb</b><br/>chromadb/chroma:0.5.20</td>
+            <td>its own container</td>
+            <td><span class="tag net">n/a — this is the dependency being called</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="page">
+    Built from a live trace against the deployed Swarm stack (<code class="mono">chromadb</code>,
+    <code class="mono">llama-generator</code>, <code class="mono">generator-api</code> — all 1/1) and a direct read
+    of <code class="mono">mcp_server/orchestrator.py</code>, <code class="mono">mcp_server/llm_roles/factory.py</code>,
+    <code class="mono">mcp_server/policy.py</code>, and <code class="mono">mcp_server/scoring.py</code>.
+  </footer>
+
+</div>

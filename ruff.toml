@@ -1,0 +1,45 @@
+# Minimal ruff configuration, scoped to the new/modified Generator+RAG
+# modules from this hardening phase (spec section 11: "Scope static checks
+# to new and modified Generator/RAG modules first if the legacy repository
+# cannot pass globally" -- the rest of the repo was never linted before this
+# pass and rewriting it is out of scope). `include` below is an allowlist:
+# ruff only checks these paths, never the legacy mcp_server/orchestrator.py,
+# web/backend.py, web/auth.py, etc.
+
+target-version = "py313"
+line-length = 120
+
+include = [
+    "mcp_server/generator_claims.py",
+    "mcp_server/generator_prompts.py",
+    "mcp_server/generator_service.py",
+    "mcp_server/llamacpp_config.py",
+    "mcp_server/llm_roles/llamacpp_client.py",
+    "mcp_server/llm_roles/foundation_sec_generator.py",
+    "mcp_server/rag/*.py",
+    "web/generator_api.py",
+    "scripts/*.py",
+    "tests/test_rag_*.py",
+    "tests/test_generator_*.py",
+    "tests/test_exact_identifier_routing.py",
+    "tests/test_token_budget.py",
+    "tests/test_structured_output_mode.py",
+    "tests/test_job_service.py",
+    "tests/test_docker_artifacts_static.py",
+    "tests/test_real_model_lib.py",
+    "tests/test_real_model_generator.py",
+]
+
+[lint]
+# A deliberately small rule set: real bugs (F = pyflakes) and import hygiene
+# (I = isort) first; E/W style rules are largely already satisfied by this
+# codebase's existing conventions. Not adding stricter rule families (ANN,
+# D, S, ...) that would force rewriting docstrings/signatures across dozens
+# of already-reviewed files for no correctness benefit.
+select = ["E", "F", "I"]
+ignore = [
+    "E501",  # line length: this codebase already wraps deliberately, not at a fixed column
+]
+
+[lint.isort]
+known-first-party = ["mcp_server", "web", "scripts"]

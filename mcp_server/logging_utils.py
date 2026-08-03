@@ -72,6 +72,15 @@ class AuditLogger:
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
-    def transitions(self) -> list:
-        """Ordered list of MCP states this session passed through."""
-        return [e["state"] for e in self.events]
+    def transitions(self, session_id: str | None = None) -> list:
+        """Ordered list of MCP states passed through.
+
+        AuditLogger instances are long-lived (one per llm_mode, cached across
+        every request -- see web/generator_api.py's _mcp_servers), so
+        self.events accumulates every event ever logged by this instance, not
+        just the current session's. Without session_id, this returns that
+        entire cross-session history; callers building a single session's
+        response MUST pass session_id to get only that session's transitions.
+        """
+        events = self.events if session_id is None else [e for e in self.events if e["session_id"] == session_id]
+        return [e["state"] for e in events]

@@ -76,6 +76,18 @@ CLAIM_SCHEMA = {
         "context": {"type": "string", "maxLength": 500},
         "generated_at": {"type": "string", "format": "date-time"},
         "generator_role": {"type": "string", "const": "GENERATOR"},
+        # Optional (not in `required`): populated only when the Generator's
+        # optional local RAG layer (mcp_server/rag/) was enabled and used for
+        # this Claim. Absent entirely when RAG is disabled (the default) --
+        # additive-only, no existing contract is broken by these fields.
+        "reference_ids": {
+            "type": "array", "uniqueItems": True,
+            "items": {"type": "string", "maxLength": 50},
+        },
+        "limitations": {
+            "type": "array", "items": {"type": "string", "maxLength": 200},
+        },
+        "retrieval_trace_id": {"type": "string", "maxLength": 50},
     },
 }
 

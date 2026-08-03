@@ -16,6 +16,18 @@ ENDPOINT_WHITELIST = {
 
 SUPPORTED_LLM_MODES = ("mock", "llama", "real")
 
+# Which Generator implementation the orchestrator selects (spec: "Prepare
+# Verifier integration without enabling it by default"). Orthogonal to
+# llm_mode (which governs Generator/Verifier/Validator together via mock/
+# llama/real): this flag ONLY affects which Generator class is built
+# (mcp_server/llm_roles/factory.py::build_generator), never the Verifier or
+# Validator. "ollama" (the default, current stable behavior) keeps the
+# existing llm_mode-based dispatch untouched; "foundation_sec_rag" swaps in
+# mcp_server.llm_roles.foundation_sec_generator.FoundationSecRagGenerator,
+# which bridges the new llama.cpp/ChromaDB RAG Generator into the same
+# synchronous Generator interface.
+SUPPORTED_GENERATOR_BACKENDS = ("ollama", "foundation_sec_rag")
+
 
 @dataclass(frozen=True)
 class MCPConfig:
@@ -44,9 +56,25 @@ class MCPConfig:
     generator_model: str = field(default_factory=lambda: os.environ.get("GENERATOR_OLLAMA_MODEL", "qwen2.5:7b-instruct"))
     verifier_model: str = field(default_factory=lambda: os.environ.get("VERIFIER_OLLAMA_MODEL", "llama3.1"))
 
+    # Optional local RAG layer (mcp_server/rag/) for the Generator only. Off by
+    # default: when False, LlamaGenerator behaves exactly as before this layer
+    # was added -- no import, no ChromaDB/embedding dependency is touched. See
+    # mcp_server/rag/config.py for the rest of the RAG-specific settings.
+    rag_enabled: bool = field(default_factory=lambda: os.environ.get("RAG_ENABLED", "false").lower() == "true")
+
+    # See SUPPORTED_GENERATOR_BACKENDS above. Defaults to "ollama" -- the
+    # stable, already-qualified path -- so existing deployments and every
+    # test that constructs MCPConfig() with no override are completely
+    # unaffected by this flag's existence.
+    generator_backend: str = field(default_factory=lambda: os.environ.get("GENERATOR_BACKEND", "ollama"))
+
     def __post_init__(self):
         if self.llm_mode not in SUPPORTED_LLM_MODES:
             raise ValueError(f"Unsupported MCP_LLM_MODE: {self.llm_mode!r}")
+        if self.generator_backend not in SUPPORTED_GENERATOR_BACKENDS:
+            raise ValueError(
+                f"Unsupported GENERATOR_BACKEND: {self.generator_backend!r}; must be one of {SUPPORTED_GENERATOR_BACKENDS}"
+            )
 
 
 DEFAULT_CONFIG = MCPConfig()

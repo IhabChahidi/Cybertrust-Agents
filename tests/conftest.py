@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -24,12 +25,23 @@ def _ollama_available() -> bool:
 
 
 def pytest_collection_modifyitems(config, items):
-    if _ollama_available():
-        return
     skip_ollama = pytest.mark.skip(reason="Ollama not reachable at http://localhost:11434 — normal suite does not require it")
+    ollama_up = _ollama_available()
+
+    # real_model tests (tests/test_real_model_generator.py) hit a live
+    # llama.cpp server hosting the actual Foundation-Sec GGUF -- never run in
+    # normal CI/dev, opt-in only via RUN_REAL_MODEL_TESTS=true (spec section 8:
+    # "Do not require the GGUF model in normal CI").
+    run_real_model = os.environ.get("RUN_REAL_MODEL_TESTS", "").strip().lower() == "true"
+    skip_real_model = pytest.mark.skip(
+        reason="real_model tests are opt-in only; set RUN_REAL_MODEL_TESTS=true to run them against a live llama.cpp server"
+    )
+
     for item in items:
-        if "ollama" in item.keywords:
+        if "ollama" in item.keywords and not ollama_up:
             item.add_marker(skip_ollama)
+        if "real_model" in item.keywords and not run_real_model:
+            item.add_marker(skip_real_model)
 
 
 @pytest.fixture()
