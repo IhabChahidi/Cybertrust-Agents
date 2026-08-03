@@ -62,9 +62,27 @@ mypy
 
 ### Lancer la suite de tests
 
+Deux suites distinctes, volontairement séparées (voir `.github/workflows/tests.yml`) :
+
+**Rapide, sans dépendance externe — celle que la CI exécute à chaque push/PR :**
+
 ```bash
-python -m pytest -v
+python -m pytest -m "not ollama and not real_model" -v
 ```
+
+**Qualification réelle, opt-in, jamais en CI normale** — nécessite un vrai
+serveur llama.cpp hébergeant le vrai GGUF Foundation-Sec ; voir
+[Tests d'inférence réelle](#tests-dinférence-réelle-opt-in-jamais-en-ci-normale)
+plus bas pour le détail complet :
+
+```bash
+RUN_REAL_MODEL_TESTS=true python -m pytest tests/test_real_model_generator.py -m real_model -v -s
+```
+
+Sans argument, `python -m pytest -v` fonctionne aussi : `tests/conftest.py`
+ignore automatiquement `real_model` sauf si `RUN_REAL_MODEL_TESTS=true`, et
+`ollama` si aucun serveur Ollama n'est joignable. Les deux commandes
+ci-dessus rendent cette séparation explicite plutôt qu'implicite.
 
 ### Valider le catalogue Evidence
 

@@ -1,0 +1,68 @@
+name: Tests
+
+# Two deliberately separate suites (see README.md "Lancer la suite de
+# tests"): a fast, dependency-free suite that runs on every push/PR, and an
+# opt-in real-model qualification suite that never runs automatically --
+# it needs a live llama.cpp server hosting the real Foundation-Sec GGUF,
+# which no GitHub-hosted runner has. Triggering it requires both a manual
+# workflow_dispatch AND a self-hosted runner with that server reachable;
+# nothing here can accidentally make it part of normal CI.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      real_model:
+        description: "Run the opt-in real-model qualification suite instead of the fast suite (requires a self-hosted runner with a live llama.cpp/Foundation-Sec server)"
+        type: boolean
+        default: false
+
+jobs:
+  test-fast:
+    if: github.event_name != 'workflow_dispatch' || inputs.real_model == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      # -m "not ollama and not real_model" makes the exclusion explicit
+      # rather than relying solely on tests/conftest.py's auto-skip -- a
+      # second, marker-level line of defense against a slow/networked test
+      # accidentally running here.
+      - run: python -m pytest -m "not ollama and not real_model" -v
+
+  test-real-model:
+    if: github.event_name == 'workflow_dispatch' && inputs.real_model == true
+    # Requires a self-hosted runner with a live llama.cpp server already
+    # running and reachable at GENERATOR_BASE_URL -- not configured by
+    # default. Set up a runner with the "real-model" label and the
+    # GENERATOR_BASE_URL repository/environment variable before using this.
+    runs-on: [self-hosted, real-model]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt -r requirements-realmodel.txt
+
+      - run: python -m pytest tests/test_real_model_generator.py -m real_model -v -s
+        env:
+          RUN_REAL_MODEL_TESTS: "true"
+          GENERATOR_BASE_URL: ${{ vars.GENERATOR_BASE_URL }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-model-results
+          path: artifacts/real_model/

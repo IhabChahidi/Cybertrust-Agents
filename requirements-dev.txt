@@ -1,6 +1,11 @@
 # Development-only tooling (spec: "Add required dependencies to the
 # appropriate development requirements file"). Not required to run the
-# application or its test suite -- only for `ruff check` / `mypy`, scoped
-# per ruff.toml / mypy.ini to the new Generator/RAG modules.
+# application itself -- ruff/mypy are lint/typecheck tools, scoped per
+# ruff.toml / mypy.ini to the new Generator/RAG modules. pytest IS required
+# to run the test suite at all (tests/, .github/workflows/tests.yml) --
+# previously only present because it happened to be globally installed on
+# every development machine so far; never actually declared anywhere, which
+# would have broken a clean CI runner with nothing to fall back on.
 ruff==0.16.0
 mypy==2.3.0
+pytest==9.0.2

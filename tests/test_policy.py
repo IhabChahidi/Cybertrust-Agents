@@ -272,3 +272,47 @@ def test_requires_ciso_approval_is_pure_function_of_decision():
     assert requires_ciso_approval(DECISION_READY_FOR_CISO_INFORMATION) is False
     assert requires_ciso_approval(DECISION_REJECTED) is False
     assert requires_ciso_approval(DECISION_INSUFFICIENT_EVIDENCE) is False
+
+
+# --- PolicyValidator (mcp_server/llm_roles/policy_validator.py) -------------
+# Previously untested: build_validator(llm_mode="llama") returns this class,
+# but no test ever instantiated or called it directly -- only MockValidator
+# (its behaviorally-identical sibling, both just call decide()) had coverage.
+
+def test_policy_validator_delegates_to_decide_and_calls_no_llm():
+    from mcp_server.config import MCPConfig
+    from mcp_server.llm_roles.policy_validator import PolicyValidator
+
+    validator = PolicyValidator(MCPConfig(llm_mode="llama"))
+    result = validator.validate(
+        verification_result={"id": "VER-0001", "status": "supported"},
+        mcp_score={"id": "MCP-SCORE-0001", "risk_level": "CRITICAL"},
+        diagnostic_warnings=[],
+        decision_id="VAL-0001", session_id="SES-20260722-PILOT", correlation_id="COR-20260722-PILOT",
+    )
+    assert result["decision"] == DECISION_READY_FOR_CISO_DECISION
+    assert result["requires_ciso_approval"] is True
+
+
+def test_policy_validator_and_mock_validator_agree_on_every_status_risk_pair():
+    """The two classes are supposed to be behaviorally identical (both are
+    pure pass-throughs to decide()) -- assert that directly rather than just
+    trusting the docstrings, across the same truth-table this file already
+    uses for decide() itself."""
+    from mcp_server.config import MCPConfig
+    from mcp_server.llm_roles.mock_validator import MockValidator
+    from mcp_server.llm_roles.policy_validator import PolicyValidator
+
+    policy_validator = PolicyValidator(MCPConfig(llm_mode="llama"))
+    mock_validator = MockValidator()
+
+    for status in _STATUSES:
+        for risk_level in _RISK_LEVELS:
+            verification_result = {"id": "VER-0001", "status": status}
+            mcp_score = {"id": "MCP-SCORE-0001", "risk_level": risk_level}
+            kwargs = dict(diagnostic_warnings=[], decision_id="VAL-0001",
+                          session_id="SES-20260722-PILOT", correlation_id="COR-20260722-PILOT")
+            a = policy_validator.validate(verification_result=verification_result, mcp_score=mcp_score, **kwargs)
+            b = mock_validator.validate(verification_result=verification_result, mcp_score=mcp_score, **kwargs)
+            assert a["decision"] == b["decision"]
+            assert a["requires_ciso_approval"] == b["requires_ciso_approval"]

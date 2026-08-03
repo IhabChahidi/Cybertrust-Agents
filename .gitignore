@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.coverage
 mcp_server/journal.jsonl
 mcp_server/journal_*.jsonl
 mcp_server/rag_store/
