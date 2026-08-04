@@ -4,6 +4,27 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Deterministic dev credentials for the dashboard auth tests
+# (tests/test_web_auth.py, web/auth.py). MUST be set here, in conftest.py --
+# pytest guarantees this module is imported before any test module in this
+# directory, which is what makes this deterministic. web/auth.py seeds its
+# in-memory user table from these env vars ONCE, at web.backend's import
+# time; several other test files (test_generator_api.py,
+# test_generator_verifier_validator_integration.py) also import web.backend
+# and, alphabetically, collect before test_web_auth.py. Setting these only
+# inside test_web_auth.py itself (as it used to) meant whichever of those
+# other files happened to import web.backend first won the race: on a
+# machine with a local .env already setting CISO_DEV_PASSWORD (never
+# committed, gitignored), load_dotenv()'s default of not overriding existing
+# env vars papered over the bug by coincidence; on a clean CI checkout with
+# no .env, web.auth fell back to generating a random dev password before
+# test_web_auth.py's own os.environ.setdefault() ever ran, and every login
+# in that file failed with 401 -- a real bug, not a CI-specific quirk.
+os.environ.setdefault("CISO_DEV_USERNAME", "ciso")
+os.environ.setdefault("CISO_DEV_PASSWORD", "test-ciso-pass-001")
+os.environ.setdefault("DELEGATE_DEV_USERNAME", "ciso.delegate")
+os.environ.setdefault("DELEGATE_DEV_PASSWORD", "test-delegate-pass-002")
+
 import pytest
 import requests
 
