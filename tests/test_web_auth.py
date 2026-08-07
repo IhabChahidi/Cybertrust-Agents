@@ -1,18 +1,16 @@
 """Auth flow tests for the dashboard backend (web/auth.py + web/backend.py).
 
-Sets deterministic dev credentials via env vars BEFORE importing web.backend,
-since web.auth seeds its in-memory user table at import time.
+Deterministic dev credentials are set in tests/conftest.py, not here -- that
+module is guaranteed by pytest to import before this one (or any other test
+module that imports web.backend first and seeds web.auth's in-memory user
+table with a different value). See conftest.py's comment for why this
+matters and what broke when the env vars were set here instead.
 """
 
 import os
 import sys
 import time
 from pathlib import Path
-
-os.environ.setdefault("CISO_DEV_USERNAME", "ciso")
-os.environ.setdefault("CISO_DEV_PASSWORD", "test-ciso-pass-001")
-os.environ.setdefault("DELEGATE_DEV_USERNAME", "ciso.delegate")
-os.environ.setdefault("DELEGATE_DEV_PASSWORD", "test-delegate-pass-002")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:

@@ -1,0 +1,17 @@
+# Swarm-only overlay for docker-compose.yml.
+#
+# `docker stack deploy` doesn't understand two things the base file uses:
+# the condition-based `depends_on:` map, and `build:` (Swarm never builds,
+# only pulls/runs images). This file replaces both for generator-api;
+# everything else is inherited from docker-compose.yml unchanged.
+#
+# Usage:
+#   docker compose build generator-api
+#   docker stack deploy -c docker-compose.yml -c docker-stack.yml cybertrust
+
+services:
+  generator-api:
+    image: cybertrustagents-generator-api:latest
+    depends_on:
+      - chromadb
+      - llama-generator

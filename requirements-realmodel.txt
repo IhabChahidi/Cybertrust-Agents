@@ -1,0 +1,19 @@
+# Optional tooling for provisioning a REAL Foundation-Sec/llama.cpp backend
+# (spec: real-model qualification suite, tests/test_real_model_generator.py).
+# Not required to run the application, its test suite, or `RUN_REAL_MODEL_TESTS`
+# itself -- only needed once, to fetch/convert the GGUF model file.
+#
+# huggingface_hub provides the `huggingface-cli` used to download the base
+# model (fdtn-ai/Foundation-Sec-8B) or a pre-quantized GGUF release.
+huggingface_hub==0.27.1
+
+# --- Non-Python prerequisites (not installable via pip -- see README.md) ---
+# - llama.cpp itself: https://github.com/ggml-org/llama.cpp
+#     Either a prebuilt release binary (github.com/ggml-org/llama.cpp/releases)
+#     or built from source, which additionally requires:
+#       - CMake            (winget install --id Kitware.CMake -e)
+#       - A C++ compiler   (winget install --id Microsoft.VisualStudio.2022.BuildTools -e
+#                            --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended")
+# - The GGUF model file itself (several GB) -- never downloaded automatically
+#   by this repo's code (docker-compose.yml, scripts/); must be fetched
+#   explicitly and placed under ./models/.

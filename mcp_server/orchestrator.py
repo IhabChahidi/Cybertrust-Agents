@@ -34,6 +34,7 @@ from mcp_server.diagnostics import compute_diagnostic_details, compute_diagnosti
 from mcp_server.errors import EventCode, LLMOutputContractViolation, MCPBlockedError, MCPTechnicalFailure
 from mcp_server.llm_roles.factory import build_generator, build_validator, build_verifier
 from mcp_server.logging_utils import AuditLogger
+from mcp_server.rag.config import CORPORATE_EVIDENCE, VULNERABILITIES
 from mcp_server.scoring import compute_mcp_score
 from mcp_server.schemas import (
     CLAIM_SCHEMA,
@@ -70,6 +71,51 @@ def _schema_check(kind: str, data: dict, role: str) -> None:
         raise MCPBlockedError(EventCode.SCHEMA_ERROR, f"[{role}] {kind} schema violation: {detail}")
 
 
+# RAG evidence_type (mcp_server.rag.schemas.RagIngestionEvidence, free-form
+# ingestion vocabulary) -> EVIDENCE_SCHEMA's fixed "type" enum. Unrecognized
+# values fall back to "report" rather than raising -- a RAG evidence_type this
+# adapter doesn't know about should degrade to a generic, still-valid Evidence
+# rather than block a Claim outright (the real safety checks live in
+# _diagnostics()/policy.py, not in this label).
+_RAG_EVIDENCE_TYPE_MAP = {
+    "remediation_ticket": "ticket",
+    "vulnerability_scan": "scan_result",
+    "audit_record": "audit_record",
+    "validation_record": "validation_record",
+    "incident_action": "incident_action",
+    "committee_action": "committee_action",
+}
+
+
+def _adapt_rag_evidence_to_schema(record_id: str, document: str, metadata: dict, *, severity: str) -> dict:
+    """Converts one RAG-ingested corporate_evidence record (Chroma document +
+    metadata, mcp_server.rag.ingestion.ingest_evidence()'s own shape) into an
+    EVIDENCE_SCHEMA-conformant dict, so it can be handed to the same
+    Verifier/Validator the static catalogue path already uses.
+
+    content.raw_data is the RAG document's own free text, unmodified -- this
+    is deliberately NOT forced into the "key=value; key=value" convention
+    mcp_server.evidence_parsing expects, since a real RAG record's prose
+    should never be misread as having an explicit field "marked absent"
+    just because it doesn't happen to use that convention.
+    """
+    evidence_type = _RAG_EVIDENCE_TYPE_MAP.get(metadata.get("evidence_type"), "report")
+    summary = document if len(document) <= 500 else document[:497] + "..."
+    raw_data = document if len(document) <= 5000 else document[:4997] + "..."
+    return {
+        "schema_version": "1.0",
+        "session_id": metadata.get("session_id", "SES-RAGADAPTER00"),
+        "correlation_id": metadata.get("correlation_id", "COR-RAGADAPTER00"),
+        "id": record_id,
+        "source": metadata.get("source", "RAG"),
+        "date": metadata.get("observed_at", datetime.now(timezone.utc).isoformat()),
+        "type": evidence_type,
+        "content": {"summary": summary, "raw_data": raw_data},
+        "severity": severity,
+        "integrity_hash": metadata.get("integrity_hash", "sha256:" + "0" * 64),
+    }
+
+
 def _load_evidence_catalogue(catalogue_dir: str) -> dict[str, dict]:
     catalogue = {}
     for path in sorted(Path(catalogue_dir).glob("EVD-*.json")):
@@ -92,7 +138,7 @@ class MCPSession:
 
 class MCPServer:
 
-    def __init__(self, config: MCPConfig | None = None):
+    def __init__(self, config: MCPConfig | None = None, *, chroma=None):
         self.config = config or MCPConfig()
         self.evidence_catalogue = _load_evidence_catalogue(self.config.catalogue_valid_dir)
         self.audit = AuditLogger(journal_path=self.config.journal_path)
@@ -100,6 +146,14 @@ class MCPServer:
         self.verifier = build_verifier(self.config)
         self.validator = build_validator(self.config)
         self._counters = {"CLM": 0, "VER": 0, "MCP-SCORE": 0, "VAL": 0}
+        # Optional: mcp_server.rag.chroma_client.ChromaCollections, passed by
+        # web/generator_api.py's _get_mcp_server() so process_claim() (the
+        # Foundation-Sec/RAG bridge) can resolve evidence_ids against the REAL
+        # RAG store instead of only self.evidence_catalogue -- see
+        # _select_evidence_for_claim(). None for the classic process_request()
+        # pipeline, which never needs it (its own Generator only ever cites
+        # ids already drawn from self.evidence_catalogue).
+        self.chroma = chroma
 
     def _next_id(self, prefix: str) -> str:
         self._counters[prefix] += 1
@@ -156,13 +210,7 @@ class MCPServer:
         session = MCPSession(session_id=session_id, correlation_id=correlation_id, state="INIT")
         self._log(session, event_type="SESSION_START", role="MCP", result="OK")
 
-        # Whatever gets computed before a block/failure is kept and surfaced —
-        # e.g. a HIGH-risk MCPScore that a misbehaving Validator then failed to
-        # flag for CISO approval is valuable diagnostic context, not garbage.
-        claim = verification_result = mcp_score = decision = None
-        diagnostic_warnings: list[str] = []
-        diagnostic_details: list[dict] = []
-
+        claim = None
         try:
             session.state = "VALIDATION_ENTREE"
             self._validate_entree(session, request)
@@ -172,7 +220,69 @@ class MCPServer:
 
             session.state = "GENERATION_CLAIM"
             claim = self._generation_claim(session, request, evidence)
+        except MCPBlockedError as exc:
+            return self._blocked_result(session, exc, claim=claim)
+        except MCPTechnicalFailure as exc:
+            return self._technical_failure_result(session, exc, claim=claim)
 
+        return self._run_chain_from_claim(session, claim, evidence)
+
+    def process_claim(self, claim: dict) -> dict:
+        """Entry point for a Claim generated OUTSIDE this orchestrator's own
+        Generator role -- e.g. the Foundation-Sec/RAG Generator, via
+        mcp_server.generator_claims.to_mcp_claim() -- runs VERIFICATION ->
+        DIAGNOSTICS -> SCORING -> VALIDATION -> DECISION_CISO against it,
+        reusing the exact same downstream chain and governance guarantees as
+        process_request(): whichever backend produced the Claim, the Verifier
+        and Validator run identically and stay unaware of where it came from.
+
+        Evidence for the Verifier is resolved by _select_evidence_for_claim(),
+        which checks the REAL RAG corporate_evidence collection first (via
+        self.chroma, adapting hits into EVIDENCE_SCHEMA shape) and only falls
+        back to this orchestrator's own static catalogue
+        (self.evidence_catalogue) for ids genuinely absent from RAG. Earlier
+        versions of this method resolved exclusively against the static
+        catalogue, which both blocked legitimately RAG-sourced evidence
+        (INVALID_EVIDENCE_ID for ids never mirrored into catalogue/valid/) and,
+        worse, could silently substitute an unrelated static demo record when
+        an id happened to collide between the two stores. self.chroma is None
+        for the classic process_request() pipeline (never needed there, since
+        its own Generator only ever cites ids already drawn from
+        self.evidence_catalogue), in which case this method behaves exactly
+        as the old catalogue-only resolution did.
+        """
+        session_id = claim.get("session_id") or f"SES-{uuid.uuid4().hex[:12].upper()}"
+        correlation_id = claim.get("correlation_id") or f"COR-{uuid.uuid4().hex[:12].upper()}"
+        session = MCPSession(session_id=session_id, correlation_id=correlation_id, state="INIT")
+        self._log(session, event_type="SESSION_START", role="MCP", result="OK")
+
+        try:
+            session.state = "VALIDATION_ENTREE"
+            _schema_check("Claim", claim, role="EXTERNAL_GENERATOR")
+
+            session.state = "SELECTION_EVIDENCE"
+            evidence = self._select_evidence_for_claim(session, claim, claim.get("evidence_ids") or [])
+        except MCPBlockedError as exc:
+            return self._blocked_result(session, exc, claim=claim)
+        except MCPTechnicalFailure as exc:
+            return self._technical_failure_result(session, exc, claim=claim)
+
+        return self._run_chain_from_claim(session, claim, evidence)
+
+    def _run_chain_from_claim(self, session: MCPSession, claim: dict, evidence: list[dict]) -> dict:
+        """Shared tail of process_request() (Claim from this orchestrator's own
+        Generator) and process_claim() (Claim produced externally): runs
+        VERIFICATION -> DIAGNOSTICS -> SCORING -> VALIDATION -> DECISION_CISO
+        -> COMPLETED, so both callers get identical governance guarantees.
+        """
+        # Whatever gets computed before a block/failure is kept and surfaced —
+        # e.g. a HIGH-risk MCPScore that a misbehaving Validator then failed to
+        # flag for CISO approval is valuable diagnostic context, not garbage.
+        verification_result = mcp_score = decision = None
+        diagnostic_warnings: list[str] = []
+        diagnostic_details: list[dict] = []
+
+        try:
             session.state = "VERIFICATION"
             verification_result = self._verification(session, claim, evidence)
 
@@ -200,55 +310,72 @@ class MCPServer:
                 "mcp_score": mcp_score,
                 "validation_decision": decision,
                 "ciso_routing": ciso_routing,
-                "transitions": self.audit.transitions(),
+                "transitions": self.audit.transitions(session_id=session.session_id),
             }
             return session.result
 
         except MCPBlockedError as exc:
-            attempted_stage = session.state  # the stage in progress when the block fired
-            session.state = "BLOCKED"
-            self._log(session, event_type=exc.code.value, role="MCP", result="BLOCKED", detail=exc.detail)
-            session.result = {
-                "mcp_state": "BLOCKED",
-                "session_id": session.session_id,
-                "correlation_id": session.correlation_id,
-                "blocked_reason": exc.code.value,
-                "detail": exc.detail,
-                "last_stage": attempted_stage,
-                "partial": {
-                    "claim": claim,
-                    "verification_result": verification_result,
-                    "diagnostic_warnings": diagnostic_warnings,
-                    "diagnostic_details": diagnostic_details,
-                    "mcp_score": mcp_score,
-                    "validation_decision": decision,
-                },
-                "transitions": self.audit.transitions(),
-            }
-            return session.result
-
+            return self._blocked_result(
+                session, exc, claim=claim, verification_result=verification_result,
+                diagnostic_warnings=diagnostic_warnings, diagnostic_details=diagnostic_details,
+                mcp_score=mcp_score, decision=decision,
+            )
         except MCPTechnicalFailure as exc:
-            attempted_stage = session.state  # the stage in progress when the failure fired
-            session.state = "TECHNICAL_FAILURE"
-            self._log(session, event_type=exc.code.value, role="MCP", result="TECHNICAL_FAILURE", detail=exc.detail)
-            session.result = {
-                "mcp_state": "TECHNICAL_FAILURE",
-                "session_id": session.session_id,
-                "correlation_id": session.correlation_id,
-                "failure_reason": exc.code.value,
-                "detail": exc.detail,
-                "last_stage": attempted_stage,
-                "partial": {
-                    "claim": claim,
-                    "verification_result": verification_result,
-                    "diagnostic_warnings": diagnostic_warnings,
-                    "diagnostic_details": diagnostic_details,
-                    "mcp_score": mcp_score,
-                    "validation_decision": decision,
-                },
-                "transitions": self.audit.transitions(),
-            }
-            return session.result
+            return self._technical_failure_result(
+                session, exc, claim=claim, verification_result=verification_result,
+                diagnostic_warnings=diagnostic_warnings, diagnostic_details=diagnostic_details,
+                mcp_score=mcp_score, decision=decision,
+            )
+
+    def _blocked_result(self, session: MCPSession, exc: MCPBlockedError, *, claim,
+                         verification_result=None, diagnostic_warnings=None, diagnostic_details=None,
+                         mcp_score=None, decision=None) -> dict:
+        attempted_stage = session.state  # the stage in progress when the block fired
+        session.state = "BLOCKED"
+        self._log(session, event_type=exc.code.value, role="MCP", result="BLOCKED", detail=exc.detail)
+        session.result = {
+            "mcp_state": "BLOCKED",
+            "session_id": session.session_id,
+            "correlation_id": session.correlation_id,
+            "blocked_reason": exc.code.value,
+            "detail": exc.detail,
+            "last_stage": attempted_stage,
+            "partial": {
+                "claim": claim,
+                "verification_result": verification_result,
+                "diagnostic_warnings": diagnostic_warnings or [],
+                "diagnostic_details": diagnostic_details or [],
+                "mcp_score": mcp_score,
+                "validation_decision": decision,
+            },
+            "transitions": self.audit.transitions(session_id=session.session_id),
+        }
+        return session.result
+
+    def _technical_failure_result(self, session: MCPSession, exc: MCPTechnicalFailure, *, claim,
+                                   verification_result=None, diagnostic_warnings=None, diagnostic_details=None,
+                                   mcp_score=None, decision=None) -> dict:
+        attempted_stage = session.state  # the stage in progress when the failure fired
+        session.state = "TECHNICAL_FAILURE"
+        self._log(session, event_type=exc.code.value, role="MCP", result="TECHNICAL_FAILURE", detail=exc.detail)
+        session.result = {
+            "mcp_state": "TECHNICAL_FAILURE",
+            "session_id": session.session_id,
+            "correlation_id": session.correlation_id,
+            "failure_reason": exc.code.value,
+            "detail": exc.detail,
+            "last_stage": attempted_stage,
+            "partial": {
+                "claim": claim,
+                "verification_result": verification_result,
+                "diagnostic_warnings": diagnostic_warnings or [],
+                "diagnostic_details": diagnostic_details or [],
+                "mcp_score": mcp_score,
+                "validation_decision": decision,
+            },
+            "transitions": self.audit.transitions(session_id=session.session_id),
+        }
+        return session.result
 
     # -- pipeline steps -----------------------------------------------------
 
@@ -271,18 +398,12 @@ class MCPServer:
 
         self._log(session, event_type="VALIDATION_ENTREE", role="MCP", result="OK")
 
-    def _select_evidence(self, session: MCPSession, evidence_ids: list[str]) -> list[dict]:
-        evidence = []
-        for eid in evidence_ids:
-            item = self.evidence_catalogue.get(eid)
-            if item is None:
-                raise MCPBlockedError(EventCode.INVALID_EVIDENCE_ID, f"evidence_id {eid!r} not found in static catalogue")
-            evidence.append(item)
-
+    def _scan_evidence_for_injection(self, evidence: list[dict]) -> None:
         # Injection/exfiltration can be embedded in Evidence content itself, not
         # only in the request statement (TC-10/TC-11 via a hostile raw_data, as
         # in catalogue/negative/EVD-N003.json) — scan it before it ever reaches
-        # a Generator/Verifier prompt.
+        # a Generator/Verifier prompt. Shared by both evidence-resolution paths
+        # (static catalogue and RAG-backed) so neither can skip this check.
         for item in evidence:
             text = f"{item['content'].get('summary', '')} {item['content'].get('raw_data', '')}"
             for pattern in _INJECTION_PATTERNS:
@@ -292,8 +413,89 @@ class MCPServer:
                 if pattern.search(text):
                     raise MCPBlockedError(EventCode.EXFILTRATION_ATTEMPT, f"{item['id']}.content matched: {pattern.pattern}")
 
+    def _select_evidence(self, session: MCPSession, evidence_ids: list[str]) -> list[dict]:
+        evidence = []
+        for eid in evidence_ids:
+            item = self.evidence_catalogue.get(eid)
+            if item is None:
+                raise MCPBlockedError(EventCode.INVALID_EVIDENCE_ID, f"evidence_id {eid!r} not found in static catalogue")
+            evidence.append(item)
+
+        self._scan_evidence_for_injection(evidence)
+
         self._log(session, event_type="SELECTION_EVIDENCE", role="MCP", result="OK",
                    detail=f"{len(evidence)} evidence selected")
+        return evidence
+
+    def _lookup_cve_severity(self, cve_id: str) -> str | None:
+        """Best-effort severity lookup from the RAG vulnerabilities collection
+        (mcp_server.rag.ingestion.ingest_cve() stores 'severity' in metadata).
+        Returns None if unavailable (no chroma client, cve_id not found, or
+        the store is unreachable) -- callers must fall back to a default."""
+        if self.chroma is None:
+            return None
+        try:
+            got = self.chroma.get_by_ids(collection=VULNERABILITIES, ids=[cve_id])
+        except Exception:
+            return None
+        metadatas = got.get("metadatas") or []
+        if not metadatas or metadatas[0] is None:
+            return None
+        return metadatas[0].get("severity")
+
+    def _select_evidence_for_claim(self, session: MCPSession, claim: dict, evidence_ids: list[str]) -> list[dict]:
+        """Evidence resolution for process_claim() (the Foundation-Sec/RAG
+        bridge): tries the REAL RAG corporate_evidence collection first via
+        self.chroma, adapting each hit into an EVIDENCE_SCHEMA-conformant dict
+        (_adapt_rag_evidence_to_schema), and only falls back to
+        self.evidence_catalogue (the classic pipeline's static demo fixtures)
+        for ids genuinely absent from RAG. This fixes two related defects
+        found in production: (1) an id present in BOTH stores under
+        unrelated content silently substituting the wrong record (the RAG
+        store is authoritative for RAG-sourced Claims, so it is checked
+        first, never second), and (2) a freshly RAG-ingested id that was
+        never mirrored into the static catalogue failing closed with
+        INVALID_EVIDENCE_ID even though it is real, retrievable evidence.
+        """
+        evidence: list[dict] = []
+        missing: list[str] = []
+
+        rag_hits: dict[str, tuple[str, dict]] = {}
+        if self.chroma is not None and evidence_ids:
+            try:
+                got = self.chroma.get_by_ids(collection=CORPORATE_EVIDENCE, ids=evidence_ids)
+                ids = got.get("ids") or []
+                documents = got.get("documents") or []
+                metadatas = got.get("metadatas") or []
+                for eid, document, metadata in zip(ids, documents, metadatas):
+                    if document is not None and metadata is not None:
+                        rag_hits[eid] = (document, metadata)
+            except Exception:
+                rag_hits = {}  # RAG unreachable -- fall back entirely to the static catalogue below
+
+        for eid in evidence_ids:
+            if eid in rag_hits:
+                document, metadata = rag_hits[eid]
+                cve_ids = [c for c in (metadata.get("cve_ids") or "").split(",") if c]
+                severity = next((s for c in cve_ids if (s := self._lookup_cve_severity(c))), None) or "MEDIUM"
+                evidence.append(_adapt_rag_evidence_to_schema(eid, document, metadata, severity=severity))
+                continue
+            item = self.evidence_catalogue.get(eid)
+            if item is not None:
+                evidence.append(item)
+                continue
+            missing.append(eid)
+
+        if missing:
+            raise MCPBlockedError(
+                EventCode.INVALID_EVIDENCE_ID,
+                f"evidence_id {missing[0]!r} not found in RAG store or static catalogue",
+            )
+
+        self._scan_evidence_for_injection(evidence)
+
+        self._log(session, event_type="SELECTION_EVIDENCE", role="MCP", result="OK",
+                   detail=f"{len(evidence)} evidence selected ({len(rag_hits)} from RAG)")
         return evidence
 
     def _generation_claim(self, session: MCPSession, request: dict, evidence: list[dict]) -> dict:

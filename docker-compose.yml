@@ -1,0 +1,131 @@
+# Pilot-sized local stack (spec section 17): generator-api (this repo's
+# FastAPI app, including the new /api/v1 Generator/RAG surface),
+# llama-generator (llama.cpp's OpenAI-compatible server, Foundation-Sec GGUF),
+# and chromadb (vector store). Everything runs on an internal network; only
+# generator-api's port is published to the host.
+#
+# IMPORTANT -- this file has NOT been run/verified in this environment: no
+# Docker daemon is available here (see reports/CyberTrust_Agents_Actual_State_Report.docx).
+# It has been written to the same standard as the rest of the codebase and
+# should be validated with `docker compose config` and a real build/up before
+# relying on it.
+#
+# The GGUF model is never downloaded automatically: place
+# Foundation-Sec-8B-Instruct.Q4_K_M.gguf yourself under ./models before
+# running `docker compose up` -- llama-generator mounts that directory
+# read-only and will fail to start if the file is missing (see GENERATOR_MODEL_PATH).
+# Verified real source: https://huggingface.co/mradermacher/Foundation-Sec-8B-Instruct-GGUF
+# (the base, non-instruct fdtn-ai/Foundation-Sec-8B-Q4_K_M-GGUF produces
+# incoherent chat output -- confirmed by live testing -- do not use it here).
+#
+# GPU: this compose file runs llama-generator CPU-only (LLAMA_GPU_LAYERS=0,
+# CPU llama.cpp image). To use a GPU, switch the image to a CUDA-enabled
+# llama.cpp build, add a `deploy.resources.reservations.devices` NVIDIA entry
+# to the llama-generator service, and raise LLAMA_GPU_LAYERS -- left out of
+# the default file since it requires host driver/toolkit support this
+# environment cannot verify.
+
+services:
+  chromadb:
+    image: chromadb/chroma:0.5.20
+    restart: unless-stopped
+    volumes:
+      - chroma-data:/chroma/chroma
+    networks:
+      - internal
+    # No `ports:` here -- chromadb is reachable only from other containers on
+    # the `internal` network, never from the host or the public internet.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v2/heartbeat', timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  llama-generator:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    restart: unless-stopped
+    volumes:
+      - ./models:/models:ro
+    command:
+      - "--model"
+      - "/models/Foundation-Sec-8B-Instruct.Q4_K_M.gguf"
+      - "--ctx-size"
+      - "${GENERATOR_CONTEXT_SIZE:-8192}"
+      - "--threads"
+      - "${LLAMA_THREADS:-8}"
+      - "--n-gpu-layers"
+      - "${LLAMA_GPU_LAYERS:-0}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8080"
+    networks:
+      - internal
+    # No `ports:` here either -- the model server is reachable only from
+    # generator-api over the internal network, never published to the host.
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/models', timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  generator-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      chromadb:
+        condition: service_healthy
+      llama-generator:
+        condition: service_healthy
+    environment:
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: "8000"
+      GENERATOR_BASE_URL: http://llama-generator:8080/v1
+      GENERATOR_MODEL_NAME: ${GENERATOR_MODEL_NAME:-foundation-sec-generator}
+      GENERATOR_MODEL_PATH: ${GENERATOR_MODEL_PATH:-/models/Foundation-Sec-8B-Instruct.Q4_K_M.gguf}
+      GENERATOR_CONTEXT_SIZE: ${GENERATOR_CONTEXT_SIZE:-8192}
+      GENERATOR_MAX_OUTPUT_TOKENS: ${GENERATOR_MAX_OUTPUT_TOKENS:-1200}
+      GENERATOR_TEMPERATURE: ${GENERATOR_TEMPERATURE:-0.1}
+      GENERATOR_TOP_P: ${GENERATOR_TOP_P:-0.9}
+      GENERATOR_SEED: ${GENERATOR_SEED:-42}
+      GENERATOR_TIMEOUT_SECONDS: ${GENERATOR_TIMEOUT_SECONDS:-300}
+      API_KEY_HEADER: ${API_KEY_HEADER:-X-API-Key}
+      API_KEY: ${API_KEY:-change-me}
+      RAG_ENABLED: "true"
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+    ports:
+      - "8000:8000"
+    networks:
+      - internal
+      - public
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  # `internal: true` gives chromadb/llama-generator/generator-api's
+  # container-to-container traffic zero external network access (no
+  # internet egress) -- defense in depth so that even a compromised
+  # chromadb or llama-generator container cannot reach out anywhere.
+  internal:
+    driver: bridge
+    internal: true
+  # A second, normal (non-internal) network exists ONLY so generator-api's
+  # published host port (8000) is reachable at all -- a bridge network
+  # marked `internal: true` has no gateway, so a service on ONLY that
+  # network cannot have a working `ports:` mapping. generator-api is the
+  # only service attached to this network; chromadb and llama-generator
+  # never are, and never get a published port either.
+  public:
+    driver: bridge
+
+volumes:
+  chroma-data:
