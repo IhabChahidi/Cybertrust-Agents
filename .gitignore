@@ -5,6 +5,12 @@ __pycache__/
 mcp_server/journal.jsonl
 mcp_server/journal_*.jsonl
 mcp_server/rag_store/
+# Audit journal (mcp_server/logging_utils.py::AuditLogger). Local/dev runs
+# outside Docker write here (JOURNAL_DIR unset -> "audit_journal" relative to
+# cwd); the Docker deployment writes to the same-named directory inside the
+# audit-journal-data named volume (see docker-compose.yml) -- neither is a
+# repo-tracked fact.
+audit_journal/
 web/certs/
 .env
 CISO*.txt

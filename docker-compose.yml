@@ -1,22 +1,29 @@
 # Pilot-sized local stack (spec section 17): generator-api (this repo's
 # FastAPI app, including the new /api/v1 Generator/RAG surface),
-# llama-generator (llama.cpp's OpenAI-compatible server, Foundation-Sec GGUF),
+# llama-generator (llama.cpp's OpenAI-compatible server, currently serving
+# Llama 3.1 8B Instruct GGUF -- see GENERATOR_MODEL_PATH below for why),
 # and chromadb (vector store). Everything runs on an internal network; only
 # generator-api's port is published to the host.
 #
-# IMPORTANT -- this file has NOT been run/verified in this environment: no
-# Docker daemon is available here (see reports/CyberTrust_Agents_Actual_State_Report.docx).
-# It has been written to the same standard as the rest of the codebase and
-# should be validated with `docker compose config` and a real build/up before
-# relying on it.
+# The GGUF model is never downloaded automatically: place the file yourself
+# under ./models before running `docker compose up` -- llama-generator mounts
+# that directory read-only and will fail to start if the file named by
+# GENERATOR_MODEL_PATH is missing.
 #
-# The GGUF model is never downloaded automatically: place
-# Foundation-Sec-8B-Instruct.Q4_K_M.gguf yourself under ./models before
-# running `docker compose up` -- llama-generator mounts that directory
-# read-only and will fail to start if the file is missing (see GENERATOR_MODEL_PATH).
-# Verified real source: https://huggingface.co/mradermacher/Foundation-Sec-8B-Instruct-GGUF
-# (the base, non-instruct fdtn-ai/Foundation-Sec-8B-Q4_K_M-GGUF produces
-# incoherent chat output -- confirmed by live testing -- do not use it here).
+# Generator model history:
+#   - Originally Foundation-Sec-8B-Instruct.Q4_K_M.gguf (verified source:
+#     https://huggingface.co/mradermacher/Foundation-Sec-8B-Instruct-GGUF --
+#     the base, non-instruct fdtn-ai/Foundation-Sec-8B-Q4_K_M-GGUF produces
+#     incoherent chat output, confirmed by live testing, do not use it).
+#   - Switched to Llama-3.1-8B-Instruct-Q4_K_M.gguf (2026-08-18) based on the
+#     comparative Generator benchmark (0/13 contract violations vs
+#     Foundation-Sec's 2/13 -- see
+#     reports/CyberTrust_Agents_Benchmark_Contrat_Generateur.docx). Sourced
+#     from the local Ollama installation's own llama3.1:latest pull (same
+#     GGUF blob, copied out of ~/.ollama/models/blobs -- no separate download),
+#     not from a fresh Hugging Face download.
+#   - Both files can coexist under ./models; GENERATOR_MODEL_PATH picks which
+#     one llama-generator actually loads.
 #
 # GPU: this compose file runs llama-generator CPU-only (LLAMA_GPU_LAYERS=0,
 # CPU llama.cpp image). To use a GPU, switch the image to a CUDA-enabled
@@ -49,7 +56,7 @@ services:
       - ./models:/models:ro
     command:
       - "--model"
-      - "/models/Foundation-Sec-8B-Instruct.Q4_K_M.gguf"
+      - "${GENERATOR_MODEL_PATH:-/models/Llama-3.1-8B-Instruct-Q4_K_M.gguf}"
       - "--ctx-size"
       - "${GENERATOR_CONTEXT_SIZE:-8192}"
       - "--threads"
@@ -65,11 +72,17 @@ services:
     # No `ports:` here either -- the model server is reachable only from
     # generator-api over the internal network, never published to the host.
     healthcheck:
+      # start_period widened from 30s: cold-loading the 8B Q4 GGUF from the
+      # mounted ./models volume on CPU regularly took longer than 30s+5*15s
+      # (~105s) here, which made Swarm kill and restart the container before
+      # the model ever finished loading (visible as repeated exit 137 with
+      # memory usage still under 200MiB -- a healthcheck-timeout kill, not a
+      # real OOM). 240s covers a cold load with headroom.
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/models', timeout=3)\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 240s
 
   generator-api:
     build:
@@ -85,8 +98,18 @@ services:
       CHROMA_HOST: chromadb
       CHROMA_PORT: "8000"
       GENERATOR_BASE_URL: http://llama-generator:8080/v1
-      GENERATOR_MODEL_NAME: ${GENERATOR_MODEL_NAME:-foundation-sec-generator}
-      GENERATOR_MODEL_PATH: ${GENERATOR_MODEL_PATH:-/models/Foundation-Sec-8B-Instruct.Q4_K_M.gguf}
+      # Generator switched from Foundation-Sec-8B to Llama 3.1 8B Instruct
+      # (2026-08-18): the comparative benchmark favored Llama 3.1 on contract
+      # compliance (0/13 violations vs Foundation-Sec's 2/13 -- see
+      # reports/CyberTrust_Agents_Benchmark_Contrat_Generateur.docx). The
+      # prompt-injection weakness found for Llama 3.1 as Generator
+      # (scripts/live_chain_llama_qwen.py, scenario E) is mitigated by the
+      # anti-injection rule already in mcp_server/generator_prompts.py's
+      # SYSTEM_PROMPT (rule 1) plus the Qwen 2.5 Verifier catching it
+      # downstream if it still slips through. Same GGUF file already present
+      # locally via Ollama's llama3.1:latest pull -- no new download needed.
+      GENERATOR_MODEL_NAME: ${GENERATOR_MODEL_NAME:-llama-3.1-8b-generator}
+      GENERATOR_MODEL_PATH: ${GENERATOR_MODEL_PATH:-/models/Llama-3.1-8B-Instruct-Q4_K_M.gguf}
       GENERATOR_CONTEXT_SIZE: ${GENERATOR_CONTEXT_SIZE:-8192}
       GENERATOR_MAX_OUTPUT_TOKENS: ${GENERATOR_MAX_OUTPUT_TOKENS:-1200}
       GENERATOR_TEMPERATURE: ${GENERATOR_TEMPERATURE:-0.1}
@@ -98,16 +121,61 @@ services:
       RAG_ENABLED: "true"
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      # Verifier LLM (mcp_server/llm_roles/llama_verifier.py, llm_mode="llama"),
+      # Qwen 2.5:7b-instruct via the host's native Ollama install -- there is
+      # no Ollama service in this stack (see legacy/README.md), so the
+      # container reaches out to the host itself. host.docker.internal only
+      # resolves because generator-api is also attached to the non-internal
+      # `public` network below and has the explicit extra_hosts entry.
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
+      VERIFIER_OLLAMA_MODEL: ${VERIFIER_OLLAMA_MODEL:-qwen2.5:7b-instruct}
+      # keep_alive="0" (this session's first attempt) forced a cold reload of
+      # Qwen 2.5 on EVERY Ollama call -- including each internal retry inside
+      # a single Verifier invocation -- which then reliably exceeded the 90s
+      # per-attempt timeout and failed every scenario that reached the
+      # Verifier (confirmed via the audit journal: "VERIFIER timed out after
+      # 3 attempt(s)" on every affected run). "60s" keeps the model loaded
+      # long enough to cover a verify() call's own repair-retry round trip
+      # without a second cold load, while still releasing memory between
+      # distinct, minutes-apart requests -- the actual goal of the
+      # asymmetric memory strategy (see ollama_client.call_ollama).
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-60s}
+      # Audit journal (mcp_server/logging_utils.py::AuditLogger): every
+      # process_claim()/process_request() call writes here. Without the
+      # named volume below, this directory is on the container's ephemeral
+      # filesystem and the entire audit trail is silently lost on every
+      # redeploy/restart -- confirmed happening repeatedly this session
+      # (6+ rebuilds, each one wiping the journal). JOURNAL_DIR must match
+      # the volume's mount target.
+      JOURNAL_DIR: /app/audit_journal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     networks:
       - internal
       - public
+    volumes:
+      - audit-journal-data:/app/audit_journal
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)\" || exit 1"]
+      # Real incident found during the Llama 3.1 Generator switch: with a
+      # real Verifier call (Qwen 2.5 via LlamaVerifier) offloaded to a worker
+      # thread (see the asyncio.to_thread comment in
+      # web/generator_api.py::generator_verified_claims), the healthcheck's
+      # OWN urlopen() -- a fresh Python subprocess launched by Docker every
+      # 15s, itself competing for the same host CPU during a long real-model
+      # request -- intermittently exceeded the old 3s per-check timeout
+      # (confirmed via `docker inspect ...State.Health.Log`: a plain
+      # urllib TimeoutError, not an application error; /health/live's own
+      # request log showed 200 OK for every hit that DID complete). 5
+      # consecutive timeouts within the old 5-retry/15s-interval window was
+      # enough to make Swarm kill and restart the container mid-request.
+      # Widened both the per-check timeout and the retry budget so a slow
+      # tick under real-model load doesn't get treated as a dead process.
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=10)\" || exit 1"]
       interval: 15s
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 10
       start_period: 20s
 
 networks:
@@ -129,3 +197,8 @@ networks:
 
 volumes:
   chroma-data:
+  # Survives `docker stack deploy`/`docker service update --force`/container
+  # crashes -- the whole reason this volume exists (see JOURNAL_DIR comment
+  # on generator-api above). Only removed by an explicit `docker volume rm`
+  # or `docker compose down -v`, never by a normal redeploy.
+  audit-journal-data:

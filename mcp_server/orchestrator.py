@@ -142,7 +142,13 @@ class MCPServer:
         self.config = config or MCPConfig()
         self.evidence_catalogue = _load_evidence_catalogue(self.config.catalogue_valid_dir)
         self.audit = AuditLogger(journal_path=self.config.journal_path)
-        self.generator = build_generator(self.config)
+        # Lazy: only process_request() (the classic pipeline) ever calls
+        # self.generator. process_claim() (the live Foundation-Sec/RAG bridge
+        # used by /api/v1/generator/verified-claims) never touches it, so a
+        # caller building an MCPServer(llm_mode="llama") purely to reuse its
+        # Verifier/Validator (e.g. web/generator_api.py) must not be forced to
+        # eagerly satisfy build_generator() for a role it will never invoke.
+        self._generator = None
         self.verifier = build_verifier(self.config)
         self.validator = build_validator(self.config)
         self._counters = {"CLM": 0, "VER": 0, "MCP-SCORE": 0, "VAL": 0}
@@ -154,6 +160,19 @@ class MCPServer:
         # pipeline, which never needs it (its own Generator only ever cites
         # ids already drawn from self.evidence_catalogue).
         self.chroma = chroma
+
+    @property
+    def generator(self):
+        if self._generator is None:
+            self._generator = build_generator(self.config)
+        return self._generator
+
+    @generator.setter
+    def generator(self, value):
+        # Several tests substitute a stub/rogue Generator directly (e.g.
+        # tests/test_negative.py, test_technical_failures.py) -- this setter
+        # keeps that pattern working with the lazy property above.
+        self._generator = value
 
     def _next_id(self, prefix: str) -> str:
         self._counters[prefix] += 1

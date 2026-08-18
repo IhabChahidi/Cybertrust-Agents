@@ -152,6 +152,23 @@ def enforce_source_authority(
     if claim.status != "CLAIM_GENERATED":
         return  # nothing to check for a non-conclusive result
 
+    # Rule: a conclusive claim must actually contain claim text. Diagnosed
+    # this session (scripts/diagnose_failing_scenarios.py, scenarios B/ML3):
+    # the model sometimes returns status=CLAIM_GENERATED with evidence_ids
+    # correctly populated but claim=null/empty -- nothing previously caught
+    # this before it reached mcp_server.generator_claims.to_mcp_claim(), by
+    # which point generator_service.generate_claim()'s one repair attempt had
+    # already been used up (or never triggered at all), so the model never
+    # got a chance to fix it. Checking it here, alongside the sibling
+    # evidence_ids check below, means it's caught inside the SAME
+    # try/except GeneratorOutputError in generate_claim() that already drives
+    # the repair retry for every other rule in this function.
+    if not claim.claim or not claim.claim.strip():
+        raise GeneratorOutputError(
+            "status=CLAIM_GENERATED requires non-empty claim text; a null or empty `claim` field "
+            "does not constitute a usable claim even when evidence_ids is populated"
+        )
+
     by_id = {r.record_id: r for r in included_results}
 
     # Rule: a conclusive claim requires at least one authoritative corporate
@@ -219,13 +236,27 @@ def enforce_source_authority(
             )
 
 
-def enforce_no_repair_drift(*, original_parsed: dict | None, repaired: GeneratedClaim) -> None:
+def enforce_no_repair_drift(
+    *, original_parsed: dict | None, repaired: GeneratedClaim,
+    retrieved_evidence_ids: set[str] | None = None, retrieved_reference_ids: set[str] | None = None,
+) -> None:
     """Guards the one-time JSON repair pass (spec section 14): the repair
     prompt instructs the model to fix serialization/shape only, but that
     instruction is advisory, not a guarantee -- this is the code-level check.
     Rejects a repaired output that:
-      - cites any evidence_ids/reference_ids not present in the original
-        (pre-repair) parsed output -- repair must not ADD citations;
+      - cites any evidence_ids/reference_ids that are neither in the original
+        (pre-repair) parsed output NOR actually present in the retrieved
+        context -- repair must not ADD a fabricated citation. A citation that
+        IS genuinely retrieved is allowed even if it wasn't in the original
+        attempt: diagnosed this session (scenarios B/F/G/I/ML2/ML4), the
+        repair prompt now explicitly names the real available ids (see
+        generator_prompts.build_repair_prompt's valid_evidence_ids/
+        valid_reference_ids) so the model can SWITCH a fabricated citation
+        to a real one -- rejecting that switch just because it differs from
+        the original defeated the repair's own purpose. retrieved_*_ids is
+        None for callers that don't have that context (e.g. a bare JSON-shape
+        repair with no retrieval step at all), in which case behavior is
+        unchanged from before: any new citation is rejected.
       - reports a higher confidence than the original;
       - flips status from INSUFFICIENT_EVIDENCE to CLAIM_GENERATED -- that
         would mean the repair reinterpreted missing evidence into a
@@ -244,9 +275,14 @@ def enforce_no_repair_drift(*, original_parsed: dict | None, repaired: Generated
     original_reference = set(original_parsed.get("reference_ids") or [])
     new_evidence = set(repaired.evidence_ids) - original_evidence
     new_reference = set(repaired.reference_ids) - original_reference
+    if retrieved_evidence_ids is not None:
+        new_evidence -= retrieved_evidence_ids
+    if retrieved_reference_ids is not None:
+        new_reference -= retrieved_reference_ids
     if new_evidence or new_reference:
         raise GeneratorOutputError(
-            f"repair introduced citations not present in the original output: "
+            f"repair introduced citations not present in the original output "
+            f"(and not in the retrieved context either): "
             f"evidence={sorted(new_evidence)} reference={sorted(new_reference)}"
         )
 

@@ -155,7 +155,10 @@ async def generate_claim(
         # any) so enforce_no_repair_drift() can detect the repair silently
         # adding citations, raising confidence, or flipping the status.
         original_parsed = _try_parse_json(raw_content)
-        repair_prompt = build_repair_prompt(original_output=raw_content, error_detail=str(first_error))
+        repair_prompt = build_repair_prompt(
+            original_output=raw_content, error_detail=str(first_error),
+            valid_evidence_ids=sorted(evidence_ids), valid_reference_ids=sorted(reference_ids),
+        )
         repaired_content = await chat_completion(
             config=llamacpp_config, system_prompt=SYSTEM_PROMPT, user_prompt=repair_prompt,
         )
@@ -165,7 +168,10 @@ async def generate_claim(
                 parsed, request_id=req.request_id, retrieved_evidence_ids=evidence_ids,
                 retrieved_reference_ids=reference_ids, model_name=model_name, retrieval_trace_id=trace.trace_id,
             )
-            enforce_no_repair_drift(original_parsed=original_parsed, repaired=claim)
+            enforce_no_repair_drift(
+                original_parsed=original_parsed, repaired=claim,
+                retrieved_evidence_ids=evidence_ids, retrieved_reference_ids=reference_ids,
+            )
             enforce_source_authority(
                 claim, included_results=list(included.values()),
                 case_id=req.case_id, ticket_id=req.ticket_id, asset_id=req.asset_id,

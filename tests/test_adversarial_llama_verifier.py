@@ -106,6 +106,55 @@ def test_provider_raising_generic_exception_yields_technical_failure(mcp, monkey
     assert result["failure_reason"] == EventCode.LLM_PROVIDER_ERROR.value
 
 
+def test_fabricated_citation_triggers_one_repair_attempt_that_fixes_it(mcp, monkeypatch):
+    """First call cites EVD-9999 (never provided) alongside the real EVD-0001;
+    the repair prompt should be sent, and if the (simulated) model corrects
+    itself, the final result must contain only EVD-0001 -- and call_ollama
+    must have been invoked exactly twice (initial + one repair, never more)."""
+    calls = []
+
+    def fake_call_ollama(**kwargs):
+        calls.append(kwargs["user_prompt"])
+        if len(calls) == 1:
+            return {
+                "status": "supported", "reasoning_summary": "r",
+                "supporting_evidence": ["EVD-0001", "EVD-9999"],
+                "contradicting_evidence": [], "missing_evidence": [],
+            }
+        return {
+            "status": "supported", "reasoning_summary": "r (corrigee)",
+            "supporting_evidence": ["EVD-0001"],
+            "contradicting_evidence": [], "missing_evidence": [],
+        }
+
+    monkeypatch.setattr("mcp_server.llm_roles.llama_verifier.call_ollama", fake_call_ollama)
+    mcp.verifier = LlamaVerifier(MCPConfig(llm_mode="llama"))
+    result = _run(mcp)
+    assert len(calls) == 2
+    assert "EVD-9999" in calls[1]  # repair prompt names the fabricated id
+    assert result["mcp_state"] == "COMPLETED"
+    assert result["verification_result"]["supporting_evidence"] == ["EVD-0001"]
+
+
+def test_fabricated_citation_still_present_after_repair_is_defensively_stripped(mcp, monkeypatch):
+    """If the (simulated) model repeats the same fabrication even after the
+    repair prompt, _known_only()'s existing defensive filter must still keep
+    it out of the final result -- the repair attempt is a best-effort
+    improvement, never the only safeguard."""
+    def fake_call_ollama(**kwargs):
+        return {
+            "status": "supported", "reasoning_summary": "r",
+            "supporting_evidence": ["EVD-0001", "EVD-9999"],
+            "contradicting_evidence": [], "missing_evidence": [],
+        }
+
+    monkeypatch.setattr("mcp_server.llm_roles.llama_verifier.call_ollama", fake_call_ollama)
+    mcp.verifier = LlamaVerifier(MCPConfig(llm_mode="llama"))
+    result = _run(mcp)
+    assert result["mcp_state"] == "COMPLETED"
+    assert "EVD-9999" not in result["verification_result"]["supporting_evidence"]
+
+
 def test_no_legacy_decision_value_can_ever_result_from_malformed_verifier_output(mcp, monkeypatch):
     _patch_ollama(monkeypatch, {
         "status": "unsupported", "reasoning_summary": "r",

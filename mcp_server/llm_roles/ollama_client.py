@@ -23,8 +23,17 @@ from mcp_server.errors import EventCode, MCPTechnicalFailure
 
 
 def call_ollama(*, host: str, model: str, system_prompt: str, user_prompt: str,
-                 json_schema: dict, timeout_seconds: float) -> dict:
-    """Call Ollama's chat endpoint and return the parsed, schema-shaped JSON body."""
+                 json_schema: dict, timeout_seconds: float, keep_alive: str = "0") -> dict:
+    """Call Ollama's chat endpoint and return the parsed, schema-shaped JSON body.
+
+    keep_alive: how long Ollama keeps this model loaded in memory after this
+    call returns ("0" unloads it immediately). Asymmetric memory strategy
+    (diagnosed this session: llama.cpp/Llama 3.1 and Ollama/Qwen 2.5 running
+    concurrently caused a real out-of-memory failure) -- the Generator
+    (llama.cpp) stays loaded continuously since it serves every request, so
+    only the Verifier's model needs to actively release memory between calls.
+    Ollama's own default (5 minutes) was too generous for that purpose.
+    """
     payload = {
         "model": model,
         "messages": [
@@ -33,7 +42,11 @@ def call_ollama(*, host: str, model: str, system_prompt: str, user_prompt: str,
         ],
         "format": json_schema,
         "stream": False,
-        "options": {"temperature": 0},
+        "keep_alive": keep_alive,
+        # seed pinned for reproducibility, matching mcp_server.llamacpp_config's
+        # Generator settings (seed=42) -- a compliance pipeline's Verifier
+        # should be exactly as reproducible as its Generator.
+        "options": {"temperature": 0, "seed": 42},
     }
 
     try:

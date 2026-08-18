@@ -40,9 +40,10 @@ _ALLOWED_FILES = {
     # in the final result -- asserts the ABSENCE of these literals, doesn't
     # produce them.
     REPO_ROOT / "tests" / "test_adversarial.py",
-    # Live-Ollama integration test asserting the ABSENCE of legacy values in
-    # real-model output; skipped automatically when Ollama is unavailable.
-    REPO_ROOT / "tests" / "test_ollama_integration.py",
+    # Same as test_adversarial.py above, split out for the restored
+    # LlamaVerifier: asserts the ABSENCE of these legacy values in malformed
+    # real-Verifier output, doesn't produce them.
+    REPO_ROOT / "tests" / "test_adversarial_llama_verifier.py",
     REPO_ROOT / "docs" / "s3_llama_test_results.md",
 }
 

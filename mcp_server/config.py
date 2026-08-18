@@ -42,19 +42,40 @@ class MCPConfig:
     llm_timeout_seconds: float = 30.0
     llm_max_retries: int = 2
     catalogue_valid_dir: str = "catalogue/valid"
-    journal_path: str = "mcp_server/journal.jsonl"
+    # Deliberately NOT under mcp_server/ (that directory is Python source,
+    # copied into the Docker image read-only in effect -- mounting a
+    # persistent volume there would shadow the actual package files). See
+    # JOURNAL_DIR in docker-compose.yml's generator-api service for the
+    # matching named volume that makes this survive container recreation.
+    journal_path: str = field(default_factory=lambda: os.path.join(
+        os.environ.get("JOURNAL_DIR", "audit_journal"), "journal.jsonl",
+    ))
 
     ollama_host: str = field(default_factory=lambda: os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
     # Fallback shared model, used by any role whose own env var isn't set.
     ollama_model: str = field(default_factory=lambda: os.environ.get("OLLAMA_MODEL", "llama3.1"))
+    # Asymmetric memory strategy (see ollama_client.call_ollama's docstring):
+    # "0" unloads the Verifier's Ollama model immediately after each call, so
+    # it only occupies memory while actually in use, never idling alongside
+    # the always-loaded llama.cpp Generator. Set a short duration (e.g. "30s")
+    # instead if back-to-back Verifier calls in quick succession are common
+    # enough that reload latency matters more than peak memory.
+    ollama_keep_alive: str = field(default_factory=lambda: os.environ.get("OLLAMA_KEEP_ALIVE", "0"))
 
     # Per-role model overrides for the two roles that are still genuinely
     # LLM-backed. There is no validator_model / VALIDATOR_OLLAMA_MODEL: the
     # Validator (mcp_server/llm_roles/policy_validator.py) is a deterministic
     # policy engine with no LLM call at all, so a model knob for it would be
     # dead configuration. It was removed rather than kept-but-unused.
+    # generator_model is dead configuration for the live production path (the
+    # Generator is always Foundation-Sec-8B via mcp_server.generator_service,
+    # never this Ollama-backed knob) -- kept only for the classic /api/process
+    # pipeline in legacy/, whose LlamaGenerator reads it if ever restored.
     generator_model: str = field(default_factory=lambda: os.environ.get("GENERATOR_OLLAMA_MODEL", "qwen2.5:7b-instruct"))
-    verifier_model: str = field(default_factory=lambda: os.environ.get("VERIFIER_OLLAMA_MODEL", "llama3.1"))
+    # Production Verifier model when llm_mode="llama" (mcp_server/llm_roles/llama_verifier.py).
+    # Qwen 2.5:7b-instruct, not Llama 3.1: see factory.py's build_verifier() docstring
+    # for the benchmark data behind this choice (ground-truth accuracy + injection resistance).
+    verifier_model: str = field(default_factory=lambda: os.environ.get("VERIFIER_OLLAMA_MODEL", "qwen2.5:7b-instruct"))
 
     # Optional local RAG layer (mcp_server/rag/) for the Generator only. Off by
     # default: when False, LlamaGenerator behaves exactly as before this layer

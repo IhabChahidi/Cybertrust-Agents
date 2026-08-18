@@ -5,6 +5,7 @@ Run with:
 from the project root, then open http://localhost:8000/.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -45,9 +46,12 @@ def _get_server(llm_mode: str) -> MCPServer:
     if llm_mode not in SUPPORTED_LLM_MODES:
         raise HTTPException(400, f"Unsupported llm_mode: {llm_mode!r}. Must be one of {SUPPORTED_LLM_MODES}.")
     if llm_mode not in _servers:
+        # Not under mcp_server/ -- that directory is Python source; a
+        # persistent Docker volume there would shadow the package files.
+        journal_dir = os.environ.get("JOURNAL_DIR", "audit_journal")
         config = MCPConfig(
             llm_mode=llm_mode,
-            journal_path=str(REPO_ROOT / "mcp_server" / f"journal_{llm_mode}.jsonl"),
+            journal_path=str(REPO_ROOT / journal_dir / f"journal_{llm_mode}.jsonl"),
             llm_timeout_seconds=90.0 if llm_mode == "llama" else 30.0,
         )
         _servers[llm_mode] = MCPServer(config)

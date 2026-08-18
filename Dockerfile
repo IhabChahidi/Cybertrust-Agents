@@ -18,7 +18,10 @@ COPY web ./web
 COPY config ./config
 COPY catalogue ./catalogue
 
-RUN mkdir -p /app/mcp_server/rag_store && chown -R app:app /app
+# audit_journal/ is a separate top-level directory (NOT under mcp_server/,
+# which is Python source) so a persistent named volume can be mounted there
+# in docker-compose.yml without shadowing any package file.
+RUN mkdir -p /app/mcp_server/rag_store /app/audit_journal && chown -R app:app /app
 
 USER app
 

@@ -16,6 +16,8 @@ simple (mcp_server/rag/jobs.py's in-memory JobService), documented there as
 "replaceable by a queue later" rather than built out now.
 """
 
+import asyncio
+import os
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -45,7 +47,11 @@ from mcp_server.rag.retrieval import RagUnavailable, retrieve
 
 router = APIRouter(prefix="/api/v1")
 
-_JOURNAL_PATH = "mcp_server/journal_generator_api.jsonl"
+# Not under mcp_server/ -- that directory is Python source; a persistent
+# Docker volume there would shadow the package files. See JOURNAL_DIR on
+# generator-api's named volume in docker-compose.yml.
+_JOURNAL_DIR = os.environ.get("JOURNAL_DIR", "audit_journal")
+_JOURNAL_PATH = f"{_JOURNAL_DIR}/journal_generator_api.jsonl"
 
 # Module-level singletons, overridable per-request via FastAPI dependency
 # overrides in tests (see tests/test_generator_api.py) -- production code
@@ -98,7 +104,7 @@ def _get_mcp_server(llm_mode: str) -> MCPServer:
     if llm_mode not in _mcp_servers:
         config = MCPConfig(
             llm_mode=llm_mode,
-            journal_path=f"mcp_server/journal_verified_claims_{llm_mode}.jsonl",
+            journal_path=f"{_JOURNAL_DIR}/journal_verified_claims_{llm_mode}.jsonl",
             llm_timeout_seconds=90.0 if llm_mode == "llama" else 30.0,
         )
         _mcp_servers[llm_mode] = MCPServer(config, chroma=_chroma)
@@ -338,7 +344,7 @@ async def generator_claims(
 async def generator_verified_claims(
     req: VerifiedClaimApiRequest, chroma: ChromaCollections = Depends(get_chroma),
     embeddings: EmbeddingBackend = Depends(get_embeddings), rag_config: RagConfig = Depends(get_rag_config),
-    llamacpp_config: LlamaCppConfig = Depends(get_llamacpp_config), audit: AuditLogger = Depends(get_audit),
+    llamacpp_config: LlamaCppConfig = Depends(get_llamacpp_config),
 ):
     """Composes the Foundation-Sec/RAG Generator with the existing MCP
     Verifier/Validator chain: Foundation-Sec owns generation end to end (its
@@ -351,7 +357,34 @@ async def generator_verified_claims(
     status == INSUFFICIENT_EVIDENCE is returned as-is, without ever reaching
     the Verifier: an inconclusive Foundation-Sec result is not something for
     the Verifier to adjudicate, per to_mcp_claim()'s own contract.
+
+    Audit coverage (added after a real diagnostic gap found in this session:
+    every stage before process_claim() -- Generator call, Generator output,
+    contract adaptation -- used to be invisible in the audit journal on
+    failure, forcing a one-off diagnostic script instead of just reading the
+    journal). session_id/correlation_id are minted HERE, before anything can
+    fail, and every stage below logs to server.audit (the SAME journal
+    process_claim()'s own internal stages write to -- one coherent trace per
+    session_id, not split across files) so a CISO or engineer can reconstruct
+    exactly what happened, including WHY a request never reached the
+    Verifier, without re-running anything.
     """
+    server = _get_mcp_server(req.llm_mode)
+    session_id = f"SES-{uuid.uuid4().hex[:12].upper()}"
+    correlation_id = f"COR-{uuid.uuid4().hex[:12].upper()}"
+
+    def _log(*, event_type: str, role: str, result: str, detail: str = "") -> None:
+        server.audit.log(
+            session_id=session_id, correlation_id=correlation_id, state="GENERATION",
+            event_type=event_type, role=role, result=result, detail=detail,
+        )
+
+    _log(
+        event_type="REQUEST_RECEIVED", role="MCP", result="OK",
+        detail=(f"request_id={req.request_id} question={req.question!r} case_id={req.case_id} "
+                f"ticket_id={req.ticket_id} asset_id={req.asset_id} llm_mode={req.llm_mode}"),
+    )
+
     try:
         generated = await generate_claim(
             GeneratorClaimRequest(
@@ -361,13 +394,26 @@ async def generator_verified_claims(
             chroma=chroma, embeddings=embeddings, rag_config=rag_config, llamacpp_config=llamacpp_config,
         )
     except GeneratorRequestError as exc:
+        _log(event_type="GENERATION_FAILED", role="MCP", result="REJECTED", detail=f"GeneratorRequestError: {exc}")
         raise HTTPException(400, str(exc))
     except (ChromaUnavailable, EmbeddingBackendUnavailable, RagUnavailable) as exc:
+        _log(event_type="GENERATION_FAILED", role="MCP", result="TECHNICAL_FAILURE", detail=f"retrieval unavailable: {exc}")
         raise HTTPException(503, f"retrieval unavailable: {exc}")
     except GeneratorOutputError as exc:
+        _log(event_type="GENERATION_FAILED", role="GENERATOR", result="OUTPUT_INVALID", detail=str(exc))
         raise HTTPException(502, f"generator produced unusable output: {exc}")
     except TimeoutError as exc:
+        _log(event_type="GENERATION_FAILED", role="GENERATOR", result="TIMEOUT", detail=str(exc))
         raise HTTPException(504, f"generator model timed out: {exc}")
+
+    # Logged regardless of status -- this is exactly the (status, claim,
+    # evidence_ids, reference_ids) tuple that previously required a one-off
+    # debug script (scripts/diagnose_failing_scenarios.py) to observe.
+    _log(
+        event_type="GENERATION_RESULT", role="GENERATOR", result=generated.status,
+        detail=(f"claim={generated.claim!r} evidence_ids={generated.evidence_ids} "
+                f"reference_ids={generated.reference_ids} reasoning_summary={generated.reasoning_summary!r}"),
+    )
 
     if generated.status != "CLAIM_GENERATED":
         return {
@@ -377,18 +423,28 @@ async def generator_verified_claims(
             "limitations": generated.limitations,
         }
 
-    server = _get_mcp_server(req.llm_mode)
-    session_id = f"SES-{uuid.uuid4().hex[:12].upper()}"
-    correlation_id = f"COR-{uuid.uuid4().hex[:12].upper()}"
     claim_id = server._next_id("CLM")  # CLAIM_SCHEMA requires the ^CLM-[0-9]{4}$ shape this orchestrator's own Generator uses
     try:
         mcp_claim = to_mcp_claim(
-            generated, session_id=session_id, correlation_id=correlation_id, claim_id=claim_id, audit=audit,
+            generated, session_id=session_id, correlation_id=correlation_id, claim_id=claim_id, audit=server.audit,
         )
     except GeneratorOutputError as exc:
+        _log(event_type="ADAPTATION_FAILED", role="MCP", result="REJECTED", detail=str(exc))
         raise HTTPException(502, f"Foundation-Sec claim could not be adapted to the MCP contract: {exc}")
 
-    return server.process_claim(mcp_claim)
+    # process_claim() is synchronous and, when llm_mode="llama", calls
+    # LlamaVerifier -> ollama_client.call_ollama(), which blocks on
+    # `requests.post()` for the Ollama response (tens of seconds under real
+    # load). Calling it directly inside this async def route would block
+    # uvicorn's single event loop for that entire duration -- starving every
+    # other concurrent request, INCLUDING this same process's own /health/live
+    # healthcheck, which is exactly what caused Swarm to kill the container as
+    # "unhealthy" mid-request the first time llm_mode="llama" actually reached
+    # this line (Foundation-Sec's frequent INSUFFICIENT_EVIDENCE responses had
+    # masked this, never reaching process_claim() at all in earlier testing).
+    # asyncio.to_thread offloads the blocking call to a worker thread so the
+    # event loop stays free.
+    return await asyncio.to_thread(server.process_claim, mcp_claim)
 
 
 # Health endpoints are unprefixed (/health/live, /health/ready), not under

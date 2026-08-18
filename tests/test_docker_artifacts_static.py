@@ -56,7 +56,19 @@ def test_model_path_matches_env_default_and_is_never_downloaded(compose, dockerf
     command = llama["command"]
     assert "--model" in command
     model_path = command[command.index("--model") + 1]
-    assert model_path == "/models/Foundation-Sec-8B-Instruct.Q4_K_M.gguf"
+    # llama-generator's own --model arg and generator-api's GENERATOR_MODEL_PATH
+    # env default must reference the identical GGUF file: whichever model the
+    # server actually loads is the one the API's llamacpp_client points at (see
+    # mcp_server/llamacpp_config.py). Both are ${VAR:-default} shell syntax --
+    # this test parses that default rather than hardcoding a specific model name,
+    # so a model swap only needs to be made consistently in this one file.
+    assert model_path.startswith("${GENERATOR_MODEL_PATH:-") and model_path.endswith("}")
+    command_default = model_path[len("${GENERATOR_MODEL_PATH:-"):-1]
+    api_env = compose["services"]["generator-api"]["environment"]["GENERATOR_MODEL_PATH"]
+    assert api_env.startswith("${GENERATOR_MODEL_PATH:-") and api_env.endswith("}")
+    api_default = api_env[len("${GENERATOR_MODEL_PATH:-"):-1]
+    assert command_default == api_default
+    assert command_default.startswith("/models/") and command_default.endswith(".gguf")
     # No RUN/CMD/ENTRYPOINT anywhere in either file may fetch the model --
     # only a read-only bind mount supplies it (see next test).
     for forbidden in ("wget ", "curl ", "huggingface-cli", "hf_hub_download", "snapshot_download"):

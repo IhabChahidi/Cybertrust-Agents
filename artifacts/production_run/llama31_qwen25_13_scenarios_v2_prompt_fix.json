@@ -1,0 +1,169 @@
+[
+  {
+    "scenario_id": "A",
+    "scenario_name": "valid_remediation_with_verification",
+    "question": "Is CVE-2026-12345 remediated on SRV-ERP-01 (case VUL-018)?",
+    "request": {
+      "request_id": "FULL-A",
+      "question": "Is CVE-2026-12345 remediated on SRV-ERP-01 (case VUL-018)?",
+      "llm_mode": "llama",
+      "case_id": "VUL-018",
+      "ticket_id": "SEC-104",
+      "asset_id": "SRV-ERP-01"
+    },
+    "http_status": 200,
+    "latency_seconds": 174.8,
+    "response": {
+      "mcp_state": "COMPLETED",
+      "session_id": "SES-BEF5A0580DC0",
+      "correlation_id": "COR-5BE3CF5CE000",
+      "claim": {
+        "schema_version": "1.0",
+        "session_id": "SES-BEF5A0580DC0",
+        "correlation_id": "COR-5BE3CF5CE000",
+        "id": "CLM-0002",
+        "evidence_ids": [
+          "EVD-0001",
+          "EVD-0002"
+        ],
+        "statement": "CVE-2026-12345 is remediated on SRV-ERP-01.",
+        "confidence": 1.0,
+        "context": "Ticket SEC-104 was closed with a vendor patch applied for CVE-2026-12345 on SRV-ERP-01, and a subsequent rescan confirmed the vulnerability is no longer present.",
+        "generated_at": "2026-08-18T12:25:48.502470+00:00",
+        "generator_role": "GENERATOR",
+        "reference_ids": [
+          "CVE-2026-12345"
+        ],
+        "limitations": [
+          "No verification scan evidence exists for this claim."
+        ],
+        "retrieval_trace_id": "RAGTRC-F350252780DE"
+      },
+      "verification_result": {
+        "schema_version": "1.0",
+        "session_id": "SES-BEF5A0580DC0",
+        "correlation_id": "COR-5BE3CF5CE000",
+        "id": "VER-0002",
+        "claim_id": "CLM-0002",
+        "status": "supported",
+        "reasoning_summary": "Evidence EVD-0001 confirms that the vendor patch for CVE-2026-12345 has been applied on SRV-ERP-01, and Evidence EVD-0002 confirms that the vulnerability is no longer present after the rescan, directly supporting the claim.",
+        "supporting_evidence": [
+          "EVD-0001",
+          "EVD-0002"
+        ],
+        "contradicting_evidence": [],
+        "missing_evidence": [],
+        "verified_at": "2026-08-18T12:27:40.423952+00:00",
+        "verifier_role": "VERIFIER"
+      },
+      "mcp_score": {
+        "schema_version": "1.0",
+        "session_id": "SES-BEF5A0580DC0",
+        "correlation_id": "COR-5BE3CF5CE000",
+        "id": "MCP-SCORE-0002",
+        "verification_result_id": "VER-0002",
+        "value": 74.0,
+        "risk_level": "HIGH",
+        "factors": {
+          "severity": 18.0,
+          "exposure": 15.0,
+          "impact": 15.0,
+          "evidence_quality": 6.0,
+          "verification": 20.0,
+          "contradiction_penalty": 0.0
+        },
+        "calculation_version": "1.0",
+        "calculated_at": "2026-08-18T12:27:40.474649+00:00"
+      },
+      "validation_decision": {
+        "schema_version": "1.0",
+        "session_id": "SES-BEF5A0580DC0",
+        "correlation_id": "COR-5BE3CF5CE000",
+        "id": "VAL-0002",
+        "verification_result_id": "VER-0002",
+        "mcp_score_reference": "MCP-SCORE-0002",
+        "decision": "READY_FOR_CISO_DECISION",
+        "diagnostic_warnings": [
+          "MISSING_EXPECTED_FIELD",
+          "MISSING_EXPECTED_FIELD"
+        ],
+        "justification": "Claim supporte par les Evidence ['EVD-0001', 'EVD-0002'], score MCP 74.0/100 (HIGH). Achemine vers une decision CISO (risque eleve et/ou avertissement diagnostique serieux). Avertissements diagnostiques : MISSING_EXPECTED_FIELD, MISSING_EXPECTED_FIELD.",
+        "risk_level": "HIGH",
+        "requires_ciso_approval": true,
+        "policy_rule": "POL-001",
+        "applied_exception": true,
+        "decided_at": "2026-08-18T12:27:40.493605+00:00",
+        "validator_role": "VALIDATOR",
+        "policy_version": "1.1",
+        "policy_reason": "High-risk supported claims require a CISO decision.",
+        "configuration_hash": "03edb99960d120cd",
+        "diagnostic_details": [
+          {
+            "code": "MISSING_EXPECTED_FIELD",
+            "severity": "SERIOUS",
+            "evidence_ids": [
+              "EVD-0001"
+            ],
+            "field": "status",
+            "message": "Evidence type 'ticket' is missing expected field(s): ['status'].",
+            "rule_id": "DIAG-MISS-001"
+          },
+          {
+            "code": "MISSING_EXPECTED_FIELD",
+            "severity": "SERIOUS",
+            "evidence_ids": [
+              "EVD-0002"
+            ],
+            "field": "result",
+            "message": "Evidence type 'scan_result' is missing expected field(s): ['result'].",
+            "rule_id": "DIAG-MISS-001"
+          }
+        ]
+      },
+      "ciso_routing": "READY_FOR_CISO_DECISION",
+      "transitions": [
+        "INIT",
+        "SELECTION_EVIDENCE",
+        "VERIFICATION",
+        "DIAGNOSTICS",
+        "SCORING",
+        "VALIDATION",
+        "DECISION_CISO",
+        "COMPLETED"
+      ]
+    },
+    "error": null
+  },
+  {
+    "scenario_id": "B",
+    "scenario_name": "closed_ticket_without_verification",
+    "question": "Is CVE-2026-12345 remediated on SRV-HR-02 (case VUL-020)?",
+    "request": {
+      "request_id": "FULL-B",
+      "question": "Is CVE-2026-12345 remediated on SRV-HR-02 (case VUL-020)?",
+      "llm_mode": "llama",
+      "case_id": "VUL-020",
+      "ticket_id": "SEC-200",
+      "asset_id": "SRV-HR-02"
+    },
+    "http_status": 502,
+    "latency_seconds": 137.3,
+    "response": null,
+    "error": "{\"detail\":\"generator produced unusable output: generation failed validation twice (repair did not fix it): first=the claim asserts a remediation/closure/compliance outcome supported only by ticket/action evidence (types: remediation_ticket); a verification scan or equivalent technical evidence is required for this kind of conclusion; after repair=repair increased confidence from 0.8 to 1.0, which is not permitted\"}"
+  },
+  {
+    "scenario_id": "C",
+    "scenario_name": "public_cve_information_only",
+    "question": "What does CVE-2027-99999 affect, according to MITRE ATT&CK T1190? Is it remediated anywhere?",
+    "request": {
+      "request_id": "FULL-C",
+      "question": "What does CVE-2027-99999 affect, according to MITRE ATT&CK T1190? Is it remediated anywhere?",
+      "llm_mode": "llama",
+      "case_id": "VUL-999"
+    },
+    "http_status": 502,
+    "latency_seconds": 147.7,
+    "response": null,
+    "error": "{\"detail\":\"generator produced unusable output: generation failed validation twice (repair did not fix it): first=model did not return valid JSON: Illegal trailing comma before end of object: line 8 column 82 (char 476). Raw (truncated): {\\n  \\\"status\\\": \\\"CLAIM_GENERATED\\\",\\n  \\\"claim\\\": \\\"CVE-2027-99999 affects Exploit Public-Facing Application, according to MITRE ATT&CK T1190.\\\",\\n  \\\"evidence_ids\\\": [],\\n  \\\"reference_ids\\\": [\\\"CVE-2027-99999\\\", \\\"attack-pattern--fictitious-0001\\\"],\\n  \\\"reasoning_summary\\\": \\\"Based on the MITRE ATT&CK knowledge, CVE-2; after repair=claim mentions id 'T1190', which was not in the retrieved context\"}"
+  }
+]

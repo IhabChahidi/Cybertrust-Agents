@@ -51,7 +51,17 @@ class LlamaCppConfig:
     ))
     context_size: int = field(default_factory=lambda: _env_int("GENERATOR_CONTEXT_SIZE", 8192))
     max_output_tokens: int = field(default_factory=lambda: _env_int("GENERATOR_MAX_OUTPUT_TOKENS", 1200))
-    temperature: float = field(default_factory=lambda: _env_float("GENERATOR_TEMPERATURE", 0.1))
+    # 0.0 (strict greedy decoding), not 0.1: diagnosed this session (ML2/ML3,
+    # ML1 fixed) -- after adding the language-consistency rule to
+    # generator_prompts.py, the Generator's status decision moved close
+    # enough to a token-probability tie that temperature=0.1's residual
+    # sampling noise alone made the SAME question/evidence flip between
+    # CLAIM_GENERATED and INSUFFICIENT_EVIDENCE across otherwise-identical
+    # calls (3 runs each, 0.1 gave inconsistent results). A compliance
+    # pipeline's Generator must be exactly reproducible, not merely "usually"
+    # -- see mcp_server/config.py's parallel ollama_keep_alive/seed
+    # reproducibility rationale for the Verifier.
+    temperature: float = field(default_factory=lambda: _env_float("GENERATOR_TEMPERATURE", 0.0))
     top_p: float = field(default_factory=lambda: _env_float("GENERATOR_TOP_P", 0.9))
     seed: int = field(default_factory=lambda: _env_int("GENERATOR_SEED", 42))
     request_timeout_seconds: float = field(default_factory=lambda: _env_float("GENERATOR_TIMEOUT_SECONDS", 300.0))

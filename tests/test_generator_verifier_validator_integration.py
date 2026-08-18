@@ -167,6 +167,18 @@ def test_verified_claims_returns_insufficient_evidence_without_reaching_verifier
     assert body["mcp_state"] == "INSUFFICIENT_EVIDENCE"
     assert "verification_result" not in body
 
+    # Audit coverage (added after a real diagnostic gap this session: these
+    # pre-Verifier stages used to be invisible in the journal on anything
+    # other than a fully-COMPLETED session). REQUEST_RECEIVED and
+    # GENERATION_RESULT must both be present, on the SAME session_id, even
+    # though this request never reaches process_claim().
+    events = generator_api._mcp_servers["mock"].audit.events
+    event_types = [e["event_type"] for e in events if e["correlation_id"] == events[-1]["correlation_id"]]
+    assert "REQUEST_RECEIVED" in event_types
+    assert "GENERATION_RESULT" in event_types
+    result_event = next(e for e in events if e["event_type"] == "GENERATION_RESULT")
+    assert result_event["result"] == "INSUFFICIENT_EVIDENCE"
+
 
 def test_verified_claims_fails_closed_when_cited_evidence_is_absent_from_orchestrator_catalogue(client, monkeypatch):
     """The Foundation-Sec RAG evidence collection and the orchestrator's own
@@ -216,3 +228,88 @@ def test_verified_claims_fails_closed_when_cited_evidence_is_absent_from_orchest
     body = resp.json()
     assert body["mcp_state"] == "BLOCKED"
     assert body["blocked_reason"] == "INVALID_EVIDENCE_ID"
+
+
+def test_verified_claims_rejects_empty_claim_text_with_a_repair_attempt(client, monkeypatch):
+    """Reproduces the exact real-world failure diagnosed this session
+    (scripts/diagnose_failing_scenarios.py, scenarios B/ML3): Foundation-Sec
+    returns status=CLAIM_GENERATED with evidence_ids populated but claim=null.
+    Previously nothing caught this before to_mcp_claim() rejected it too late
+    for a repair attempt. enforce_source_authority() now checks claim text
+    too (mcp_server/generator_claims.py), so generate_claim() itself catches
+    it, attempts its one deterministic repair, and -- since this mock always
+    returns the same malformed JSON -- fails closed with GENERATION_FAILED,
+    never reaching to_mcp_claim()/ADAPTATION_FAILED at all. Confirms both the
+    fix and that the failure (now caught one stage earlier) is still fully
+    visible in the audit journal.
+    """
+    _ingest_rag_evidence(client)
+    empty_claim = (
+        '{"status": "CLAIM_GENERATED", "claim": null, '
+        '"evidence_ids": ["EVD-0001"], "reference_ids": [], '
+        '"reasoning_summary": "Ticket closed for EVD-0001.", "confidence": 0.8, "limitations": []}'
+    )
+    monkeypatch.setattr("mcp_server.generator_service.chat_completion", _mock_chat_completion(empty_claim))
+
+    resp = client.post(
+        "/api/v1/generator/verified-claims",
+        json={"request_id": "REQ-VC-0004", "question": "Is SEC-1452 remediated?"},
+        headers=_headers(),
+    )
+    assert resp.status_code == 502
+    assert "non-empty claim text" in resp.text
+
+    events = generator_api._mcp_servers["mock"].audit.events
+    event_types = [e["event_type"] for e in events if e["correlation_id"] == events[-1]["correlation_id"]]
+    assert "REQUEST_RECEIVED" in event_types
+    assert "GENERATION_FAILED" in event_types
+    failed_event = next(e for e in events if e["event_type"] == "GENERATION_FAILED")
+    assert "non-empty claim text" in failed_event["detail"]
+
+
+def test_verified_claims_repairs_empty_claim_text_when_the_model_self_corrects(client, monkeypatch):
+    """Happy-path counterpart to the test above: if the model DOES fill in
+    claim text on the repair attempt (unlike the always-broken mock above),
+    generate_claim() must succeed on the second try -- proving the new check
+    triggers a genuine repair opportunity, not just an earlier failure."""
+    _ingest_rag_evidence(client)
+    empty_claim = (
+        '{"status": "CLAIM_GENERATED", "claim": null, '
+        '"evidence_ids": ["EVD-0001", "EVD-0002"], "reference_ids": [], '
+        '"reasoning_summary": "Based on EVD-0001 and EVD-0002.", "confidence": 0.8, "limitations": []}'
+    )
+    calls = {"n": 0}
+
+    async def _fake(*, config, system_prompt, user_prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return empty_claim
+        return _VALID_CLAIM_JSON
+
+    monkeypatch.setattr("mcp_server.generator_service.chat_completion", _fake)
+
+    resp = client.post(
+        "/api/v1/generator/verified-claims",
+        json={"request_id": "REQ-VC-0005", "question": "Is SEC-1452 remediated?"},
+        headers=_headers(),
+    )
+    assert resp.status_code == 200
+    assert calls["n"] == 2
+    assert resp.json()["mcp_state"] == "COMPLETED"
+
+
+def test_repair_prompt_lists_the_actually_available_ids():
+    """Unit-level check that the repair prompt now names concrete valid ids
+    (diagnosed this session, scenarios G/ML4: without this, the model
+    repeated the exact same fabricated citation on the repair attempt --
+    naming the error alone gave it nothing to correct toward)."""
+    from mcp_server.generator_prompts import build_repair_prompt
+
+    prompt = build_repair_prompt(
+        original_output='{"reference_ids": ["CVE-9999-FAKE"]}',
+        error_detail="reference_ids cites 'CVE-9999-FAKE', which was not in the retrieved context",
+        valid_evidence_ids=["EVD-0001"], valid_reference_ids=["CVE-2026-12345"],
+    )
+    assert "EVD-0001" in prompt
+    assert "CVE-2026-12345" in prompt
+    assert "Cite ONLY from these two lists" in prompt

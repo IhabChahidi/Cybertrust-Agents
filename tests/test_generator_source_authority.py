@@ -189,3 +189,37 @@ def test_repair_cannot_flip_insufficient_evidence_to_claim_generated():
 def test_repair_drift_check_is_a_noop_when_original_was_not_valid_json():
     repaired = _claim(evidence_ids=["EVD-0001"], confidence=0.99)
     enforce_no_repair_drift(original_parsed=None, repaired=repaired)  # must not raise -- nothing to compare against
+
+
+# --- retrieved_*_ids relaxation (diagnosed this session: scenarios B/F/G/I/ML2/ML4 --
+# the repair prompt now names real available ids so the model can swap a fabricated
+# citation for a genuine one; rejecting that swap just because it differs from the
+# original attempt defeated the repair's own purpose) --------------------------------
+
+def test_repair_may_switch_a_reference_citation_to_one_actually_retrieved():
+    original = {"status": "CLAIM_GENERATED", "evidence_ids": ["EVD-0001"], "reference_ids": ["RB-ERP-001"], "confidence": 0.5}
+    repaired = _claim(evidence_ids=["EVD-0001"], reference_ids=["RB-ERP-001#chunk-0"])
+    enforce_no_repair_drift(
+        original_parsed=original, repaired=repaired,
+        retrieved_evidence_ids={"EVD-0001"}, retrieved_reference_ids={"RB-ERP-001#chunk-0"},
+    )  # must not raise -- RB-ERP-001#chunk-0 is genuinely in the retrieved context
+
+
+def test_repair_still_rejects_a_reference_citation_absent_from_retrieved_context():
+    original = {"status": "CLAIM_GENERATED", "evidence_ids": ["EVD-0001"], "reference_ids": [], "confidence": 0.5}
+    repaired = _claim(evidence_ids=["EVD-0001"], reference_ids=["CVE-9999-FABRICATED"])
+    with pytest.raises(GeneratorOutputError, match="introduced citations"):
+        enforce_no_repair_drift(
+            original_parsed=original, repaired=repaired,
+            retrieved_evidence_ids={"EVD-0001"}, retrieved_reference_ids={"RB-ERP-001#chunk-0"},
+        )  # CVE-9999-FABRICATED is in neither the original nor the retrieved context -- still a real fabrication
+
+
+def test_repair_still_rejects_new_evidence_citation_absent_from_retrieved_context():
+    original = {"status": "CLAIM_GENERATED", "evidence_ids": ["EVD-0001"], "reference_ids": [], "confidence": 0.5}
+    repaired = _claim(evidence_ids=["EVD-0001", "EVD-9999"])
+    with pytest.raises(GeneratorOutputError, match="introduced citations"):
+        enforce_no_repair_drift(
+            original_parsed=original, repaired=repaired,
+            retrieved_evidence_ids={"EVD-0001"}, retrieved_reference_ids=set(),
+        )
